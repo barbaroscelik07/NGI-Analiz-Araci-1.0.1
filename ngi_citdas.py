@@ -18,12 +18,18 @@ def resource_path(rel):
 
 # ── NGI Cut-off D50 (µm) ──────────────────────────────────────────────────────
 NGI_CUTOFFS = {
-    15:  {"Device":999.0,"Throat":30.00,"Presep":30.00,"S1":14.10,"S2":8.61,"S3":5.39,"S4":3.30,"S5":2.08,"S6":1.36,"S7":0.98},
-    30:  {"Device":999.0,"Throat":14.10,"Presep":14.10,"Presep":14.10,"S1":8.06, "S2":4.46,"S3":2.82,"S4":1.66,"S5":0.94,"S6":0.55,"S7":0.34},
-    45:  {"Device":999.0,"Throat":11.00,"Presep":11.00,"Presep":11.00,"S1":6.12, "S2":3.42,"S3":2.09,"S4":1.21,"S5":0.72,"S6":0.40,"S7":0.24},
-    60:  {"Device":999.0,"Throat":8.06,"Presep":8.06,"Presep":8.06, "S1":4.46, "S2":2.82,"S3":1.66,"S4":0.94,"S5":0.55,"S6":0.34,"S7":0.21},
-    90:  {"Device":999.0,"Throat":5.39,"Presep":5.39,"Presep":5.39, "S1":3.30, "S2":2.08,"S3":1.36,"S4":0.98,"S5":0.55,"S6":0.34,"S7":0.21},
-    100: {"Device":999.0,"Throat":4.95,"Presep":4.95,"Presep":4.95, "S1":2.89, "S2":1.78,"S3":1.12,"S4":0.69,"S5":0.43,"S6":0.25,"S7":0.14},
+    15:  {"Device":999.0,"Throat":999.0,"Presep":999.0,"S1":999.0,
+          "S2":8.61,"S3":5.39,"S4":3.30,"S5":2.08,"S6":1.36,"S7":0.98,"MOC":0.54},
+    30:  {"Device":999.0,"Throat":999.0,"Presep":999.0,"S1":999.0,
+          "S2":4.46,"S3":2.82,"S4":1.66,"S5":0.94,"S6":0.55,"S7":0.34,"MOC":0.21},
+    45:  {"Device":999.0,"Throat":999.0,"Presep":999.0,"S1":999.0,
+          "S2":3.42,"S3":2.09,"S4":1.21,"S5":0.72,"S6":0.40,"S7":0.24,"MOC":0.13},
+    60:  {"Device":999.0,"Throat":999.0,"Presep":999.0,"S1":999.0,
+          "S2":8.06,"S3":4.46,"S4":2.82,"S5":1.66,"S6":0.94,"S7":0.55,"MOC":0.34},
+    90:  {"Device":999.0,"Throat":999.0,"Presep":999.0,"S1":999.0,
+          "S2":2.08,"S3":1.36,"S4":0.98,"S5":0.55,"S6":0.34,"S7":0.21,"MOC":0.10},
+    100: {"Device":999.0,"Throat":999.0,"Presep":999.0,"S1":999.0,
+          "S2":1.78,"S3":1.12,"S4":0.69,"S5":0.43,"S6":0.25,"S7":0.14,"MOC":0.08},
 }
 STAGE_ORDER = ["Device","Throat","Presep","S1","S2","S3","S4","S5","S6","S7"]
 CP = ["#2E75B6","#ED7D31","#70AD47","#E84040","#7030A0","#00B0F0","#D4A000","#C00000"]
@@ -88,14 +94,15 @@ def calc_run(masses, flow, lo=15, hi=85, use_ism=True):
     ism = sum(masses.get(s,0) for s in ["S1","S2","S3","S4","S5","S6","S7","MOC"])
     delivered = ism  # Emitted = ISM
     denom = ism if use_ism else metered
-    ism_stages = ["S1","S2","S3","S4","S5","S6","S7"]
+    ism_stages = ["S1","S2","S3","S4","S5","S6","S7","MOC"]
     cum = []
     for s in STAGE_ORDER:
         mass = masses.get(s, 0)
         u = 0.0
         if s in ism_stages and denom > 0:
+            # CITDAS: inclusive undersize (o stage dahil)
             u = sum(masses.get(x,0) for x in ism_stages
-                    if co.get(x,0) < co.get(s,0)) / denom * 100
+                    if co.get(x,0) <= co.get(s,0)) / denom * 100
         cum.append({"stage":s,"d50":co.get(s,0),"mass":mass,"u_pct":u})
     valid = [r for r in cum if r["stage"]!="Presep" and lo<r["u_pct"]<hi]
     res = {"metered":metered,"delivered":delivered,"cum_data":cum,
@@ -111,7 +118,7 @@ def calc_run(masses, flow, lo=15, hi=85, use_ism=True):
     z5 = a+b*math.log10(5.0)
     res.update({"n":len(valid),"a":a,"b":b,"slope":b,"intercept":a+5,"r2":r2,
                 "mmad":10**(-a/b),"gsd":10**(1/b),
-                "fpd":norm.cdf(z5)*metered,"fpf":norm.cdf(z5)*100,"x_reg":x,"y_reg":y})
+                "fpd":norm.cdf(z5)*ism,"fpf":norm.cdf(z5)*ism/metered*100,"x_reg":x,"y_reg":y})
     return res
 
 def calc_summary(runs):
@@ -556,7 +563,7 @@ class NGIApp(ctk.CTk):
             font=ctk.CTkFont(size=10,weight="bold"),
             text_color="#FFC600",anchor="w").pack(fill="x",padx=6,pady=(4,2))
         gf=ctk.CTkFrame(self.cbox,fg_color="transparent"); gf.pack(padx=6,pady=(0,6))
-        for s in [s for s in STAGE_ORDER if s not in ("Device","Throat","Presep")]:
+        for s in [s for s in STAGE_ORDER if s not in ("Device","Throat","Presep","S1")] + ["MOC"]:
             c=ctk.CTkFrame(gf,fg_color="#001a40",corner_radius=4,width=48)
             c.pack(side="left",padx=2); c.pack_propagate(False)
             ctk.CTkLabel(c,text=s.replace("Presep","Pre"),
