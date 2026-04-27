@@ -1,24 +1,5 @@
 """NGI Cascade Impactor Analysis Tool v3 - Ph.Eur 2.9.18 / USP <601>"""
-import subprocess, sys
 
-def _ensure_pkg(pkg, import_name=None):
-    """Paket yoksa otomatik yükle"""
-    name = import_name or pkg
-    try:
-        __import__(name)
-    except ImportError:
-        print(f"{pkg} yükleniyor...")
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", pkg, "-q",
-             "--break-system-packages"],
-            creationflags=0x08000000 if sys.platform=="win32" else 0
-        )
-
-_ensure_pkg("customtkinter")
-_ensure_pkg("matplotlib")
-_ensure_pkg("scipy")
-_ensure_pkg("Pillow", "PIL")
-_ensure_pkg("reportlab")
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import customtkinter as ctk
@@ -165,21 +146,18 @@ def make_pdf(path, run_results, meta, flow, T):
     import io as _io
 
     # Türkçe font kaydı
-    # Uygulama dizinindeki font
-    _app_dir = os.path.dirname(os.path.abspath(__file__))
+    # Font yolları - PyInstaller _MEIPASS desteği dahil
     font_paths = [
-        os.path.join(_app_dir, 'DejaVuSans.ttf'),
+        resource_path('DejaVuSans.ttf'),
         '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
         'C:/Windows/Fonts/DejaVuSans.ttf',
         'C:/Windows/Fonts/arial.ttf',
-        'C:/Windows/Fonts/calibri.ttf',
     ]
     font_bold_paths = [
-        os.path.join(_app_dir, 'DejaVuSans-Bold.ttf'),
+        resource_path('DejaVuSans-Bold.ttf'),
         '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
         'C:/Windows/Fonts/DejaVuSans-Bold.ttf',
         'C:/Windows/Fonts/arialbd.ttf',
-        'C:/Windows/Fonts/calibrib.ttf',
     ]
     fn = "DVSans"; fnb = "DVSansBold"
     registered = False
