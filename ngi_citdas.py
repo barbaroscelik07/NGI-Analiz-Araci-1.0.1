@@ -251,9 +251,13 @@ def make_pdf(path, run_results, meta, flow, T):
     story.append(mt); story.append(Spacer(1,0.2*cm))
 
     # Cut-off tablosu
-    co_h = [Paragraph("D50\n(\u00b5m)",sB)] + [Paragraph(s,sB) for s in STAGE_ORDER]
-    co_v = [Paragraph(f"{flow} L/min",sN)] + [Paragraph(f"{co[s]:.2f}",sN) for s in STAGE_ORDER]
-    ct = Table([co_h,co_v], colWidths=[W_/9]*9)
+    # Sadece gecerli D50 degerlerini goster (999 = regresyon disi, tablodan cikar)
+    co_stages_visible = [s for s in STAGE_ORDER if co.get(s,999) < 900] + ["MOC"]
+    co_stages_visible = [s for s in co_stages_visible if co.get(s,999) < 900]
+    n_co = len(co_stages_visible)
+    co_h = [Paragraph("D50\n(\u00b5m)",sB)] + [Paragraph(s,sB) for s in co_stages_visible]
+    co_v = [Paragraph(f"{flow} L/min",sN)] + [Paragraph(f"{co[s]:.2f}",sN) for s in co_stages_visible]
+    ct = Table([co_h,co_v], colWidths=[W_/(n_co+1)]*(n_co+1))
     ts = grid_style()
 
     ct.setStyle(TableStyle(ts))
