@@ -132,6 +132,12 @@ def calc_summary(runs):
 
 # ── PDF (Türkçe DejaVu, siyah-beyaz, KeepTogether) ───────────────────────────
 def make_pdf(path, run_results, meta, flow, T):
+    try:
+        import reportlab
+    except ImportError:
+        import subprocess, sys
+        subprocess.check_call([sys.executable, "-m", "pip", "install",
+                               "reportlab", "--break-system-packages", "-q"])
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
     from reportlab.lib.units import cm
