@@ -1,0 +1,33 @@
+name: NGI Analiz Araci Build
+
+on:
+  push:
+    branches: [ "main" ] # Kod her güncellendiğinde çalışır
+
+jobs:
+  build:
+    runs-on: windows-latest # Windows sunucusunda derleme yap
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Python Kurulumu
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Kütüphanelerin Kurulması
+    # Sizin kodunuzdaki tüm bağımlılıkları buraya ekledim
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller customtkinter numpy scipy matplotlib
+
+    - name: EXE Oluşturma (PyInstaller)
+      run: |
+        python -m PyInstaller --onefile --noconsole --add-data "icon.ico;." --add-data "DejaVuSans.ttf;." --add-data "DejaVuSans-Bold.ttf;." --icon=icon.ico ngi_citdas.py
+
+    - name: EXE Dosyasını Kaydet
+      uses: actions/upload-artifact@v4
+      with:
+        name: NGI_Analiz_Programi_Guncel
+        path: dist/*.exe
