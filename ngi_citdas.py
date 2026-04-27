@@ -1,4 +1,24 @@
 """NGI Cascade Impactor Analysis Tool v3 - Ph.Eur 2.9.18 / USP <601>"""
+import subprocess, sys
+
+def _ensure_pkg(pkg, import_name=None):
+    """Paket yoksa otomatik yükle"""
+    name = import_name or pkg
+    try:
+        __import__(name)
+    except ImportError:
+        print(f"{pkg} yükleniyor...")
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", pkg, "-q",
+             "--break-system-packages"],
+            creationflags=0x08000000 if sys.platform=="win32" else 0
+        )
+
+_ensure_pkg("customtkinter")
+_ensure_pkg("matplotlib")
+_ensure_pkg("scipy")
+_ensure_pkg("Pillow", "PIL")
+_ensure_pkg("reportlab")
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import customtkinter as ctk
@@ -132,12 +152,6 @@ def calc_summary(runs):
 
 # ── PDF (Türkçe DejaVu, siyah-beyaz, KeepTogether) ───────────────────────────
 def make_pdf(path, run_results, meta, flow, T):
-    try:
-        import reportlab
-    except ImportError:
-        import subprocess, sys
-        subprocess.check_call([sys.executable, "-m", "pip", "install",
-                               "reportlab", "--break-system-packages", "-q"])
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
     from reportlab.lib.units import cm
