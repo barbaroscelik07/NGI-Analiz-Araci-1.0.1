@@ -318,40 +318,51 @@ class NGIApp(ctk.CTk):
         frame=ctk.CTkFrame(self.series_box,fg_color="#1c2336",corner_radius=8)
         frame.pack(fill="x",pady=4,padx=2)
         # Seri başlık + isim
-        hf=ctk.CTkFrame(frame,fg_color="#001a40",corner_radius=6); hf.pack(fill="x",padx=6,pady=(6,4))
+        hf=ctk.CTkFrame(frame,fg_color="#001a40",corner_radius=6)
+        hf.pack(fill="x",padx=6,pady=(6,4))
         ctk.CTkLabel(hf,text=f"  {self.T['series']} {idx}",
-            font=ctk.CTkFont(size=11,weight="bold"),text_color=color).pack(side="left",pady=4)
+            font=ctk.CTkFont(size=11,weight="bold"),text_color=color
+            ).pack(side="left",pady=4)
         name_var=ctk.StringVar(value=f"Seri {idx}")
         ctk.CTkEntry(hf,textvariable=name_var,height=24,width=120,
-            font=ctk.CTkFont(size=10),placeholder_text="Seri adı"
+            font=ctk.CTkFont(size=10),placeholder_text="Seri adi"
             ).pack(side="left",padx=8)
-        # Paste butonu
-        paste_btn=ctk.CTkButton(hf,text=self.T["paste_btn"],width=70,height=24,
+        paste_btn=ctk.CTkButton(hf,text=self.T["paste_btn"],width=80,height=24,
             font=ctk.CTkFont(size=10),fg_color="#003580",hover_color="#0055c0")
         paste_btn.pack(side="right",padx=6)
-        # Sütun başlıkları
-        ch=ctk.CTkFrame(frame,fg_color="transparent"); ch.pack(fill="x",padx=6,pady=(2,0))
-        ctk.CTkLabel(ch,text="",width=46).pack(side="left")
-        for s in ALL_KEYS:
-            ctk.CTkLabel(ch,text=s.replace("Presep","Pre"),width=52,
-                font=ctk.CTkFont(size=8),text_color="#5a8ab0",anchor="center"
-                ).pack(side="left",padx=1)
-        # 3 run girişi
-        run_entries=[]
+
+        # Grid: satır=stage, sütun=run
+        # Üst satır: boş + Run1, Run2, Run3 başlıkları
+        grid=ctk.CTkFrame(frame,fg_color="transparent")
+        grid.pack(fill="x",padx=8,pady=(4,6))
+
+        # Başlık satırı
+        ctk.CTkLabel(grid,text="Stage",width=58,
+            font=ctk.CTkFont(size=9,weight="bold"),
+            text_color="#5a8ab0",anchor="w").grid(row=0,column=0,padx=2,pady=1)
         for ri in range(RUNS_PER_SERIES):
-            rf=ctk.CTkFrame(frame,fg_color="transparent"); rf.pack(fill="x",padx=6,pady=2)
-            ctk.CTkLabel(rf,text=f"R{ri+1}",width=46,font=ctk.CTkFont(size=10,weight="bold"),
-                text_color=color,anchor="center").pack(side="left")
-            row_vars={}
-            for s in ALL_KEYS:
+            ctk.CTkLabel(grid,text=f"Run {ri+1}",width=72,
+                font=ctk.CTkFont(size=9,weight="bold"),
+                text_color=color,anchor="center").grid(row=0,column=ri+1,padx=2,pady=1)
+
+        # Stage satırları
+        run_entries=[{} for _ in range(RUNS_PER_SERIES)]
+        for si,s in enumerate(ALL_KEYS):
+            row_i=si+1
+            # Stage etiketi
+            ctk.CTkLabel(grid,text=s,width=58,
+                font=ctk.CTkFont(size=9),text_color="#aac8e8",anchor="w"
+                ).grid(row=row_i,column=0,padx=2,pady=1)
+            # Her run için giriş kutusu
+            for ri in range(RUNS_PER_SERIES):
                 v=ctk.StringVar(value="0.000")
-                e=ctk.CTkEntry(rf,textvariable=v,height=24,width=52,
+                e=ctk.CTkEntry(grid,textvariable=v,height=22,width=72,
                     font=ctk.CTkFont(size=10),justify="center")
-                e.pack(side="left",padx=1)
+                e.grid(row=row_i,column=ri+1,padx=2,pady=1)
                 e.bind("<FocusIn>", lambda ev,_v=v: _v.get()=="0.000" and _v.set(""))
                 e.bind("<FocusOut>",lambda ev,_v=v: _v.set(_v.get() or "0.000"))
-                row_vars[s]=v
-            run_entries.append(row_vars)
+                run_entries[ri][s]=v
+
         sw={"frame":frame,"name":name_var,"runs":run_entries,
             "color":color,"paste_btn":paste_btn}
         paste_btn.configure(command=lambda _sw=sw: self._paste_series(_sw))
@@ -443,6 +454,8 @@ class NGIApp(ctk.CTk):
                         ("FPF%",f"{run['fpf']:.3f}",True),
                         ("MMAD",f"{run['mmad']:.4f}",True),
                         ("GSD",f"{run['gsd']:.4f}",True),
+                        ("Slope",f"{run['slope']:.4f}",False),
+                        ("Intercept",f"{run['intercept']:.4f}",False),
                         ("R²",f"{run['r2']:.4f}",False),
                         ("n",str(run['n']),False),
                     ]
@@ -510,60 +523,69 @@ class NGIApp(ctk.CTk):
                     ax.text(mx+0.01,ax.get_ylim()[0] if ax.get_ylim()[0]>-3.5 else -3.2,
                         f"MMAD={sd['avg']['params']['mmad'][0]:.3f}",
                         color=c,fontsize=7.5,rotation=90,va="bottom")
-        ax.set_xlabel("log\u2081\u2080(D50, \u00b5m)",color="#7090b0",fontsize=10)
+        ax.set_xlabel("log₁₀(D50, µm)",color="#7090b0",fontsize=10)
         ax.set_ylabel("Probit z",color="#7090b0",fontsize=10)
-        ax.set_title("Log-Probit Graf\u0069\u011fi",color="#FFC600",fontsize=12,fontweight="bold")
+        ax.set_title("Log-Probit Grafiği",color="#FFC600",fontsize=12,fontweight="bold")
         ax.tick_params(colors="#7090b0"); ax.spines[:].set_color("#2a4060")
         ax.grid(True,color="#1a3050",ls="--",alpha=0.5)
+        # Slope ve intercept annotasyonu
+        note_lines=[]
+        for sd in self.all_series:
+            if sd["avg"] and "slope" in sd["avg"]["params"]:
+                sl=sd["avg"]["params"]["slope"][0]
+                ic=sd["avg"]["params"]["intercept"][0]
+                note_lines.append(f"{sd['name']}: slope={sl:.3f}  intercept={ic:.3f}")
+        if note_lines:
+            ax.text(0.02,0.98,"\n".join(note_lines),transform=ax.transAxes,
+                fontsize=8,color="#d0e0f0",va="top",ha="left",
+                bbox=dict(facecolor="#0e1525",alpha=0.7,edgecolor="#2a4060",pad=4))
         if ax.get_legend_handles_labels()[0]:
             ax.legend(fontsize=9,facecolor="#0e1525",labelcolor="#d0e0f0")
         fig.tight_layout()
-        FigureCanvasTkAgg(fig,master=self.pf).get_tk_widget().pack(fill="both",expand=True)
-        FigureCanvasTkAgg(fig,master=self.pf).draw()
         cv=FigureCanvasTkAgg(fig,master=self.pf); cv.draw()
         cv.get_tk_widget().pack(fill="both",expand=True)
 
     # ── Dağılım grafiği ────────────────────────────────────────────────────────
     def _plot_dist(self):
         for w in self.df.winfo_children(): w.destroy()
-        # Gösterilecek stagelar (999 olmayanlar)
         flow=int(self.var_flow.get()); co=NGI_CUTOFFS[flow]
+        # Sadece gecerli D50 olan stagelar (APSD grafigi gibi)
         vis_stages=[s for s in ALL_KEYS if co.get(s,999)<900]
         x=np.arange(len(vis_stages))
-        n_series=len(self.all_series)
-        bw=0.8/max(n_series,1)
         fig=Figure(figsize=(9,5.5),facecolor="#090c12")
         ax=fig.add_subplot(111); ax.set_facecolor("#0e1525")
-        for i,sd in enumerate(self.all_series):
+        for sd in self.all_series:
             if not sd["avg"]: continue
-            ms=[sd["avg"]["avg_masses"].get(s,0) for s in vis_stages]
-            # SD hesapla (hata çubuğu için)
-            sds=[]
             valid_runs=[r for r in sd["runs"] if "error" not in r]
+            ms=[sd["avg"]["avg_masses"].get(s,0) for s in vis_stages]
+            sds=[]
             for s in vis_stages:
                 vals=[r["masses"].get(s,0) for r in valid_runs]
                 sds.append(float(np.std(vals,ddof=1)) if len(vals)>1 else 0.0)
-            off=(i-n_series/2+0.5)*bw
-            bars=ax.bar(x+off,ms,width=bw*0.88,color=sd["color"],
-                alpha=0.85,label=sd["name"],zorder=3)
-            # SD hata çubukları
-            ax.errorbar(x+off,ms,yerr=sds,fmt="none",
-                color="white",capsize=3,lw=1.2,alpha=0.7,zorder=4)
+            # APSD tarzı: çizgi + işaretçi + hata çubuğu
+            ax.plot(x, ms, color=sd["color"], lw=2, marker="o",
+                markersize=6, label=sd["name"], zorder=4)
+            ax.fill_between(x,
+                [m-s for m,s in zip(ms,sds)],
+                [m+s for m,s in zip(ms,sds)],
+                color=sd["color"], alpha=0.15, zorder=2)
+            ax.errorbar(x, ms, yerr=sds, fmt="none",
+                color=sd["color"], capsize=4, lw=1.5, alpha=0.6, zorder=3)
         ax.set_xticks(x)
-        ax.set_xticklabels(vis_stages,rotation=30,ha="right",
-            fontsize=9,color="#7090b0")
-        ax.set_xlabel("Stage",color="#7090b0",fontsize=10)
-        ax.set_ylabel("Ortalama K\u00fctle (mg/at\u0131\u015f)",
-            color="#7090b0",fontsize=10)
+        ax.set_xticklabels(vis_stages, rotation=0, fontsize=10, color="#c0d8f0")
+        ax.set_xlabel("Stage", color="#7090b0", fontsize=11)
+        ax.set_ylabel("Ortalama Kütle (mg/atış)",
+            color="#7090b0", fontsize=11)
         ax.set_title(
-            f"Stage K\u00fctle Da\u011f\u0131l\u0131m\u0131  [{flow} L/min]"
-            f"  |  Ortalama \u00b1 SD  (n={RUNS_PER_SERIES} run/seri)",
-            color="#FFC600",fontsize=11,fontweight="bold")
-        ax.tick_params(colors="#7090b0"); ax.spines[:].set_color("#2a4060")
-        ax.grid(True,axis="y",color="#1a3050",ls="--",alpha=0.5)
+            f"APSD — Stage Kütle Dağılımı  [{flow} L/min]"
+            f"  |  Ortalama ± SD",
+            color="#FFC600", fontsize=12, fontweight="bold")
+        ax.tick_params(colors="#7090b0")
+        ax.spines[:].set_color("#2a4060")
+        ax.grid(True, color="#1a3050", ls="--", alpha=0.5)
         if ax.get_legend_handles_labels()[0]:
-            ax.legend(fontsize=9,facecolor="#0e1525",labelcolor="#d0e0f0",
-                loc="upper right")
+            ax.legend(fontsize=10, facecolor="#0e1525", labelcolor="#d0e0f0",
+                framealpha=0.8, loc="upper right")
         fig.tight_layout()
         cv=FigureCanvasTkAgg(fig,master=self.df); cv.draw()
         cv.get_tk_widget().pack(fill="both",expand=True)
@@ -694,6 +716,7 @@ class NGIApp(ctk.CTk):
 
     # ── Dil değiştir ───────────────────────────────────────────────────────────
     def _toggle_lang(self):
+        old_T=self.T
         self.lang="EN" if self.lang=="TR" else "TR"; self.T=L[self.lang]
         self.lbl_title.configure(text=self.T["title"])
         self.lbl_sub.configure(text=self.T["subtitle"])
@@ -706,6 +729,15 @@ class NGIApp(ctk.CTk):
         self.lbl_vr.configure(text=self.T["valid_range"])
         self._refresh_cutoffs()
         self.lbl_status.configure(text=self.T["status_ready"])
+        # Sekme adlarını çevir
+        tab_keys=["tab_results","tab_plot","tab_dist","tab_summary","tab_compare"]
+        for k in tab_keys:
+            try: self.tabs.rename(old_T[k], self.T[k])
+            except: pass
+        self.tabs.set(self.T["tab_results"])
+        # Seri widget paste butonlarını çevir
+        for sw in self.series_widgets:
+            sw["paste_btn"].configure(text=self.T["paste_btn"])
 
 if __name__=="__main__":
     app=NGIApp(); app.mainloop()
