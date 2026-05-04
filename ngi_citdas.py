@@ -60,6 +60,15 @@ L = {
  "outside_warn":"UYARI: Limit disi noktalar","no_ref":"Referans secilmedi",
  "ddu_label":"DDU Analizi","trend_label":"Trend Grafigi",
  "rsd_limit":"RSD Kabul (%)","cv_label":"CV%",
+ "stage":"Stage","mass_mg":"Kutle (mg)","cum_mass":"Kum. Kutle",
+ "cum_pct":"Kum. %","valid_pt":"Gecerli","probit_z":"Probit z",
+ "param":"Parametre","accept":"Kabul","fail_lbl":"BASARISIZ",
+ "pass_lbl":"GECTI","ddu_mean":"Ort.","ddu_sd":"SD","ddu_rsd":"RSD%",
+ "fp_dose":"FPD (mg)","fp_frac":"FPF (%)","slope_lbl":"Egim (Slope)",
+ "int_lbl":"Intercept","r2_lbl":"R2","n_lbl":"n",
+ "ref_comp":"Referans Karsilastirma","series_avg":"Seri Ortalamasi",
+ "trend_mmad":"MMAD Trendi","trend_gsd":"GSD Trendi",
+ "dec_sep":","
 },
 "EN":{
  "title":"NGI Cascade Impactor Analysis",
@@ -83,6 +92,15 @@ L = {
  "outside_warn":"WARNING: Points outside limits","no_ref":"No reference selected",
  "ddu_label":"DDU Analysis","trend_label":"Trend Chart",
  "rsd_limit":"RSD Accept (%)","cv_label":"CV%",
+ "stage":"Stage","mass_mg":"Mass (mg)","cum_mass":"Cum. Mass",
+ "cum_pct":"Cum. %","valid_pt":"Valid","probit_z":"Probit z",
+ "param":"Parameter","accept":"Accept","fail_lbl":"FAIL",
+ "pass_lbl":"PASS","ddu_mean":"Mean","ddu_sd":"SD","ddu_rsd":"RSD%",
+ "fp_dose":"FPD (mg)","fp_frac":"FPF (%)","slope_lbl":"Slope",
+ "int_lbl":"Intercept","r2_lbl":"R2","n_lbl":"n",
+ "ref_comp":"Reference Comparison","series_avg":"Series Summary",
+ "trend_mmad":"MMAD Trend","trend_gsd":"GSD Trend",
+ "dec_sep":"."
 }}
 
 def calc_run(masses, flow, lo=15, hi=85, delivered_tp=False):
@@ -203,6 +221,12 @@ def parse_paste(text):
     return result if result else None
 
 DISP_STAGES=["Throat","Presep","S1","S2","S3","S4","S5","S6","S7","MOC"]
+
+def fmt_num(v, decimals=4, dec_sep=","):
+    """Sayiyi formatlayip ondalik ayracini uygula"""
+    if isinstance(v, int): return str(v)
+    s = f"{v:.{decimals}f}"
+    return s.replace(".", dec_sep) if dec_sep != "." else s
 
 class NGIApp(ctk.CTk):
     def __init__(self):
@@ -448,7 +472,8 @@ class NGIApp(ctk.CTk):
                         font=NF,text_color="#ff6060").pack(anchor="w",padx=20); continue
                 tf=ctk.CTkFrame(scroll,fg_color="#111827",corner_radius=6)
                 tf.pack(fill="x",padx=16,pady=2)
-                hdrs=["Stage","D50","Mass","CumMass","Cum%","V","Probit z"]
+                T=self.T; ds=T["dec_sep"]
+                hdrs=[T["stage"],"D50",T["mass_mg"],T["cum_mass"],T["cum_pct"],T["valid_pt"],T["probit_z"]]
                 ws=[58,66,76,80,68,30,80]
                 hrow=ctk.CTkFrame(tf,fg_color="#1F4E79",corner_radius=0); hrow.pack(fill="x")
                 for h,w in zip(hdrs,ws):
@@ -463,10 +488,13 @@ class NGIApp(ctk.CTk):
                         except: pass
                     bg="#1a3a1a" if iv else ("#111827" if i%2==0 else "#0e1219")
                     dr=ctk.CTkFrame(tf,fg_color=bg,corner_radius=0); dr.pack(fill="x")
+                    _ds=self.T["dec_sep"]
                     vals=[row["stage"],
-                          f"{row['d50']:.2f}" if row['d50']<900 else "-",
-                          f"{row['mass']:.4f}",f"{cum_m:.4f}",
-                          f"{row['u_pct']:.2f}","v" if iv else "",pz]
+                          fmt_num(row["d50"],2,_ds) if row["d50"]<900 else "-",
+                          fmt_num(row["mass"],4,_ds),
+                          fmt_num(cum_m,4,_ds),
+                          fmt_num(row["u_pct"],2,_ds),
+                          "v" if iv else "",pz]
                     for val,w in zip(vals,ws):
                         ctk.CTkLabel(dr,text=val,width=w,
                             font=BF if iv else NF,
@@ -474,11 +502,18 @@ class NGIApp(ctk.CTk):
                             anchor="center").pack(side="left",padx=1,pady=1)
                 pf=ctk.CTkFrame(scroll,fg_color="#1a2540",corner_radius=6)
                 pf.pack(fill="x",padx=16,pady=(0,6))
-                params=[("Metered",f"{run['metered']:.4f}"),("Delivered",f"{run['delivered']:.4f}"),
-                        ("FPD",f"{run['fpd']:.4f}"),("FPF%",f"{run['fpf']:.3f}"),
-                        ("MMAD",f"{run['mmad']:.4f}"),("GSD",f"{run['gsd']:.4f}"),
-                        ("Slope",f"{run['slope']:.4f}"),("Int",f"{run['intercept']:.4f}"),
-                        ("R2",f"{run['r2']:.4f}"),("n",str(run['n']))]
+                ds=self.T["dec_sep"]
+                params=[
+                    (self.T["metered"],    fmt_num(run["metered"],4,ds)),
+                    (self.T["delivered"],  fmt_num(run["delivered"],4,ds)),
+                    (self.T["fp_dose"],    fmt_num(run["fpd"],4,ds)),
+                    (self.T["fp_frac"],    fmt_num(run["fpf"],3,ds)),
+                    ("MMAD",               fmt_num(run["mmad"],4,ds)),
+                    ("GSD",                fmt_num(run["gsd"],4,ds)),
+                    (self.T["slope_lbl"],  fmt_num(run["slope"],4,ds)),
+                    (self.T["int_lbl"],    fmt_num(run["intercept"],4,ds)),
+                    (self.T["r2_lbl"],     fmt_num(run["r2"],4,ds)),
+                    (self.T["n_lbl"],      str(run["n"]))]
                 for lbl,val in params:
                     ik=lbl in("FPD","FPF%","MMAD","GSD")
                     ctk.CTkLabel(pf,text=lbl,font=ctk.CTkFont(size=11),
@@ -612,21 +647,35 @@ class NGIApp(ctk.CTk):
                 mt=[sd["avg"]["avg_masses"].get(s,0) for s in vis_all]
                 for s,tv,lo2,hi2 in zip(vis_all,mt,lower,upper):
                     if tv<lo2 or tv>hi2:
-                        warnings.append(f"{sd['name']} - {s}: {tv:.4f} "
-                            f"({'yuksek' if tv>hi2 else 'dusuk'}) limit")
+                        ds_w=self.T["dec_sep"]
+                        yön="yuksek" if tv>hi2 else "dusuk"
+                        warnings.append((f"{sd['name']} - {s}: {fmt_num(tv,4,ds_w)} ({yön}) limit", False, False))
             for sd in self.all_series:
                 if sd["is_ref"] or not sd["avg"]: continue
                 f2=calc_f2(ref_masses,sd["avg"]["avg_masses"],co)
                 if f2 is not None:
                     pf2=self.T["f2_pass"] if f2>=50 else self.T["f2_fail"]
-                    warnings.insert(0,f"{self.T['f2_label']} {sd['name']}: f2={f2:.1f} ({pf2})")
+                    ds_f=self.T["dec_sep"]
+                    f2_str=fmt_num(f2,1,ds_f)
+                    # f2 pass/fail bilgisini tuple olarak sakla: (metin, is_pass)
+                    warnings.insert(0,(f"{self.T['f2_label']} {sd['name']}: f2={f2_str} ({pf2})", f2>=50, True))
         ax.set_xticks(list(x_all))
         ax.set_xticklabels(vis_all, rotation=20, ha="right",
             fontsize=10, color="#c0d8f0")
-        ax.set_xlabel("Stage",color="#7090b0",fontsize=11)
-        ax.set_ylabel("Ort. Kutle (mg/atis)",color="#7090b0",fontsize=11)
-        ttl=f"APSD  [{flow} L/min]  Ort+/-SD"
-        if ref_masses: ttl+=f"  |  Limit +/-{pct:.0f}%"
+        ax.set_xlabel(self.T["stage"],color="#7090b0",fontsize=11)
+        _ylbl = "Ort. Kutle (mg/atis)" if self.lang=="TR" else "Mean Mass (mg/actuation)"
+        ax.set_ylabel(_ylbl,color="#7090b0",fontsize=11)
+        # Y ekseni virgüllü format
+        import matplotlib.ticker as _ticker
+        _ds_ax=self.T["dec_sep"]
+        ax.yaxis.set_major_formatter(_ticker.FuncFormatter(
+            lambda v,p: f"{v:.3f}".replace(".",_ds_ax)))
+        if self.lang=="TR":
+            ttl=f"APSD  [{flow} L/min]  Ort+/-SD"
+            if ref_masses: ttl+=f"  |  Limit +/-{pct:.0f}%"
+        else:
+            ttl=f"APSD  [{flow} L/min]  Mean+/-SD"
+            if ref_masses: ttl+=f"  |  Limit +/-{pct:.0f}%"
         ax.set_title(ttl,color="#FFC600",fontsize=11,fontweight="bold")
         ax.tick_params(colors="#7090b0"); ax.spines[:].set_color("#2a4060")
         ax.grid(True,color="#1a3050",ls="--",alpha=0.5)
@@ -637,11 +686,13 @@ class NGIApp(ctk.CTk):
         cv=FigureCanvasTkAgg(fig,master=self.df); cv.draw()
         cv.get_tk_widget().pack(fill="both",expand=True)
         if warnings:
-            for wt in warnings:
-                is_f2 = self.T["f2_label"] in wt
-                is_pass = ">=50" in wt or "Benzer" in wt or "Similar" in wt
+            for item in warnings:
+                # item = (metin, is_pass, is_f2) veya eski str
+                if isinstance(item, tuple):
+                    wt, is_pass, is_f2 = item
+                else:
+                    wt, is_pass, is_f2 = item, False, False
                 if is_f2:
-                    # f2>=50 yeşil, f2<50 KIRMIZI
                     bg = "#0a2a0a" if is_pass else "#2a0a0a"
                     tc = "#90ee90" if is_pass else "#FF6060"
                 else:
@@ -660,10 +711,12 @@ class NGIApp(ctk.CTk):
         HF=ctk.CTkFont(size=13,weight="bold")
         try: rsd_lim=float(self.rsd_limit_var.get())
         except: rsd_lim=5.0
-        params_list=[("metered","Metered(mg)"),("delivered","Delivered(mg)"),
-                     ("fpd","FPD(mg)"),("fpf","FPF(%)"),
-                     ("mmad","MMAD(um)"),("gsd","GSD"),
-                     ("slope","Slope"),("intercept","Intercept"),("r2","R2")]
+        T2=self.T
+        params_list=[
+            ("metered",T2["metered"]),("delivered",T2["delivered"]),
+            ("fpd",T2["fp_dose"]),("fpf",T2["fp_frac"]),
+            ("mmad","MMAD (um)"),("gsd","GSD"),
+            ("slope",T2["slope_lbl"]),("intercept",T2["int_lbl"]),("r2",T2["r2_lbl"])]
         for sd in self.all_series:
             rt=" ["+self.T["ref_label"]+"]" if sd["is_ref"] else ""
             ctk.CTkLabel(scroll,text=f"  {sd['name']}{rt}",font=HF,
@@ -673,7 +726,8 @@ class NGIApp(ctk.CTk):
                 ctk.CTkLabel(scroll,text="  Veri yok",font=NF,text_color="#ff6060").pack(anchor="w",padx=20); continue
             tf=ctk.CTkFrame(scroll,fg_color="#111827",corner_radius=6); tf.pack(fill="x",padx=12,pady=4)
             cw=[148]+[90]*n+[90,90,82,62]
-            hdrs=["Parametre"]+[f"Run {r['run_no']}" for r in vr]+["Ort.","SD","RSD%","Kabul"]
+            T2=self.T; ds=T2["dec_sep"]
+            hdrs=[T2["param"]]+[f"{T2['run']} {r['run_no']}" for r in vr]+[T2["mean"],T2["sd"],T2["rsd"],T2["accept"]]
             hrow=ctk.CTkFrame(tf,fg_color="#1F4E79",corner_radius=0); hrow.pack(fill="x")
             for h,w in zip(hdrs,cw):
                 ctk.CTkLabel(hrow,text=h,width=w,font=BF,text_color="white",
@@ -688,11 +742,12 @@ class NGIApp(ctk.CTk):
                 dr=ctk.CTkFrame(tf,fg_color=bg,corner_radius=0); dr.pack(fill="x")
                 ctk.CTkLabel(dr,text=lbl,width=cw[0],font=BF if ik else NF,
                     text_color="#FFC600" if ik else "#c0d0e0",anchor="w").pack(side="left",padx=(6,1),pady=2)
+                ds=self.T["dec_sep"]
                 for r in vr:
                     v=r.get(key,0)
-                    ctk.CTkLabel(dr,text=f"{v:.4f}",width=90,font=NF,
+                    ctk.CTkLabel(dr,text=fmt_num(v,4,ds),width=90,font=NF,
                         text_color="#d0e8ff",anchor="center").pack(side="left",padx=1,pady=2)
-                for val,w in [(f"{mv:.4f}",90),(f"{sv:.4f}",90),(f"{rv:.2f}",82)]:
+                for val,w in [(fmt_num(mv,4,ds),90),(fmt_num(sv,4,ds),90),(fmt_num(rv,2,ds),82)]:
                     ctk.CTkLabel(dr,text=val,width=w,font=NF,text_color="#d0e8ff",
                         anchor="center").pack(side="left",padx=1,pady=2)
                 ctk.CTkLabel(dr,text="OK" if pf else "FAIL",width=62,font=BF,
@@ -700,12 +755,16 @@ class NGIApp(ctk.CTk):
                     anchor="center").pack(side="left",padx=1,pady=2)
             dv=[r.get("delivered",0) for r in vr]
             if dv:
-                dm=float(np.mean(dv)); ds=float(np.std(dv,ddof=1)) if len(dv)>1 else 0.0
-                dr2=ds/dm*100 if dm else 0.0
+                dm=float(np.mean(dv)); ds2=float(np.std(dv,ddof=1)) if len(dv)>1 else 0.0
+                dr2=ds2/dm*100 if dm else 0.0
                 df=ctk.CTkFrame(scroll,fg_color="#1a2a1a",corner_radius=6)
                 df.pack(fill="x",padx=12,pady=(0,4))
+                _ds=self.T["dec_sep"]
                 ctk.CTkLabel(df,
-                    text=f"  {self.T['ddu_label']}: Ort={dm:.4f}mg  SD={ds:.4f}  RSD={dr2:.2f}%  CV={dr2:.2f}%",
+                    text=f"  {self.T['ddu_label']}: {self.T['ddu_mean']}={fmt_num(dm,4,_ds)}mg  "
+                         f"{self.T['ddu_sd']}={fmt_num(ds2,4,_ds)}  "
+                         f"{self.T['ddu_rsd']}={fmt_num(dr2,2,_ds)}%  "
+                         f"{self.T['cv_label']}={fmt_num(dr2,2,_ds)}%",
                     font=ctk.CTkFont(size=12),text_color="#90ee90").pack(anchor="w",padx=8,pady=4)
 
     def _show_compare(self):
@@ -728,7 +787,7 @@ class NGIApp(ctk.CTk):
             for i,(m,g,c) in enumerate(zip(mmads,gsds,clrs)):
                 ax1.bar(i,m,color=c,alpha=0.85,width=0.6)
                 ax2.bar(i,g,color=c,alpha=0.85,width=0.6)
-            for ax,ttl in [(ax1,"MMAD Trend (um)"),(ax2,"GSD Trend")]:
+            for ax,ttl in [(ax1,self.T["trend_mmad"]),(ax2,self.T["trend_gsd"])]:
                 ax.set_xticks(list(xi)); ax.set_xticklabels(names,rotation=20,ha="right",
                     fontsize=9,color="#c0d8f0")
                 ax.set_title(ttl,color="#FFC600",fontsize=11,fontweight="bold")
@@ -738,12 +797,15 @@ class NGIApp(ctk.CTk):
             cv2=FigureCanvasTkAgg(fig2,master=scroll); cv2.draw()
             cv2.get_tk_widget().pack(fill="x",pady=(4,0))
         ref_sd=next((sd for sd in self.all_series if sd["is_ref"]),None)
-        params_list=[("mmad","MMAD(um)"),("gsd","GSD"),("fpd","FPD(mg)"),("fpf","FPF(%)"),
-                     ("slope","Slope"),("intercept","Intercept"),("r2","R2")]
+        T3=self.T; ds3=T3["dec_sep"]
+        params_list=[
+            ("mmad","MMAD (um)"),("gsd","GSD"),
+            ("fpd",T3["fp_dose"]),("fpf",T3["fp_frac"]),
+            ("slope",T3["slope_lbl"]),("intercept",T3["int_lbl"]),("r2",T3["r2_lbl"])]
         tf=ctk.CTkFrame(scroll,fg_color="#111827",corner_radius=6)
         tf.pack(fill="x",padx=8,pady=8)
         cw=[138]+[104]*len(self.all_series)
-        hdrs=["Parametre"]+[sd["name"]+(" *" if sd["is_ref"] else "") for sd in self.all_series]
+        hdrs=[self.T["param"]]+[sd["name"]+(" *" if sd["is_ref"] else "") for sd in self.all_series]
         hrow=ctk.CTkFrame(tf,fg_color="#1F4E79",corner_radius=0); hrow.pack(fill="x")
         for h,w in zip(hdrs,cw):
             ctk.CTkLabel(hrow,text=h,width=w,font=BF,text_color="white",
@@ -761,9 +823,14 @@ class NGIApp(ctk.CTk):
                 if not sd["avg"] or key not in sd["avg"]["params"]:
                     ctk.CTkLabel(dr,text="-",width=104,font=NF,text_color="#888",
                         anchor="center").pack(side="left",padx=1,pady=2); continue
-                val=sd["avg"]["params"][key][0]; txt=f"{val:.4f}"; clr="#d0e8ff"
+                ds3=self.T["dec_sep"]
+                val=sd["avg"]["params"][key][0]
+                txt=fmt_num(val,4,ds3); clr="#d0e8ff"
                 if rv and not sd["is_ref"] and rv>0:
-                    diff=(val-rv)/rv*100; txt+=f"\n({diff:+.1f}%)"
+                    diff=(val-rv)/rv*100
+                    diff_str=fmt_num(abs(diff),1,ds3)
+                    sign="+" if diff>=0 else "-"
+                    txt+=f"\n({sign}{diff_str}%)"
                     clr="#90ee90" if abs(diff)<10 else "#FFB060" if abs(diff)<20 else "#FF6060"
                 ctk.CTkLabel(dr,text=txt,width=104,font=ctk.CTkFont(size=12),
                     text_color=clr,anchor="center").pack(side="left",padx=1,pady=2)
@@ -831,7 +898,8 @@ class NGIApp(ctk.CTk):
         except: pct=20
         try:
             make_pdf_multi(path,self.all_series,meta,int(self.var_flow.get()),self.T,pct,
-                           rsd_lim=float(self.rsd_limit_var.get()) if self.rsd_limit_var.get() else 5.0)
+                           rsd_lim=float(self.rsd_limit_var.get()) if self.rsd_limit_var.get() else 5.0,
+                           lang=self.lang)
             # Otomatik aç
             import subprocess, platform
             try:
@@ -843,8 +911,7 @@ class NGIApp(ctk.CTk):
         except Exception as ex:
             messagebox.showerror("PDF Hatasi",str(ex))
 
-def make_pdf_multi(path,all_series,meta,flow,T,limit_pct=20,rsd_lim=5.0):
-    """CITDAS benzeri PDF rapor"""
+def make_pdf_multi(path, all_series, meta, flow, T, limit_pct=20, rsd_lim=5.0, lang="TR"):
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
     from reportlab.lib.units import cm, mm
@@ -857,7 +924,7 @@ def make_pdf_multi(path,all_series,meta,flow,T,limit_pct=20,rsd_lim=5.0):
     from reportlab.pdfbase.ttfonts import TTFont
     import os, math, numpy as np
 
-    # ── Font ──────────────────────────────────────────────────────────────────
+    # Font
     fn = "Helvetica"; fb = "Helvetica-Bold"
     for nm, ff in [("DejaVu","DejaVuSans.ttf"),("DejaVuB","DejaVuSans-Bold.ttf")]:
         fp = resource_path(ff)
@@ -869,239 +936,241 @@ def make_pdf_multi(path,all_series,meta,flow,T,limit_pct=20,rsd_lim=5.0):
         getFont("DejaVuB"); fn="DejaVu"; fb="DejaVuB"
     except: pass
 
-    # ── Renkler (siyah-beyaz uyumlu) ──────────────────────────────────────────
-    C_BLACK  = colors.black
-    C_DARK   = colors.HexColor("#1a1a1a")
-    C_MED    = colors.HexColor("#404040")
-    C_LGREY  = colors.HexColor("#F0F0F0")
-    C_MGREY  = colors.HexColor("#D0D0D0")
-    C_WHITE  = colors.white
-    C_GREEN  = colors.HexColor("#E2EFDA")
-    C_RED    = colors.HexColor("#FFCCCC")
-    C_HILITE = colors.HexColor("#D0E4F7")  # başlık için açık mavi-gri
+    W, H = A4
+    BW = W - 3*cm   # tam sayfa genislik: 17.7 cm
 
-    W, H  = A4
-    BW    = W - 3*cm   # kullanılabilir genişlik
+    # Renksiz stiller
+    def ps(sz, bold=False, color=colors.black, align=TA_LEFT):
+        return ParagraphStyle("", fontName=fb if bold else fn,
+            fontSize=sz, textColor=color, alignment=align,
+            spaceBefore=1, spaceAfter=1, leading=sz+2)
 
-    # ── Stiller ───────────────────────────────────────────────────────────────
-    def ps(sz, bold=False, color=C_DARK, align=TA_LEFT, sp_b=1, sp_a=1):
-        return ParagraphStyle("",fontName=fb if bold else fn,
-            fontSize=sz, textColor=color,
-            alignment=align, spaceBefore=sp_b, spaceAfter=sp_a,
-            leading=sz+2)
+    sTitle = ps(12, True,  colors.black, TA_CENTER)
+    sSub   = ps(8,  False, colors.black, TA_CENTER)
+    sHdr   = ps(8,  True,  colors.black, TA_LEFT)
+    sLbl   = ps(7,  True,  colors.black, TA_LEFT)
+    sVal   = ps(7,  False, colors.black, TA_CENTER)
+    sValB  = ps(7,  True,  colors.black, TA_CENTER)
+    sRed   = ps(7,  True,  colors.red,   TA_CENTER)
 
-    sTitle = ps(11, True,  C_WHITE, TA_CENTER, 0, 0)
-    sSub   = ps(8,  False, C_MGREY, TA_CENTER, 0, 0)
-    sHdr   = ps(8,  True,  C_WHITE, TA_LEFT,   0, 0)   # bölüm başlığı
-    sLbl   = ps(7,  True,  C_MED,  TA_LEFT)
-    sVal   = ps(7,  False, C_DARK, TA_CENTER)
-    sValB  = ps(7,  True,  C_DARK, TA_CENTER)
-    sHl    = ps(7,  True,  colors.HexColor("#1F4E79"), TA_CENTER)  # vurgulu parametre
-
-    # ── Yardımcı tablo stili ──────────────────────────────────────────────────
-    def tbl_style(hdr_bg=C_DARK, row_lines=True):
-        ts = [
-            ("BACKGROUND", (0,0), (-1,0), hdr_bg),
-            ("TEXTCOLOR",  (0,0), (-1,0), C_WHITE),
-            ("FONTNAME",   (0,0), (-1,0), fb),
+    # Tamamen renksiz tablo stili - sadece cizgiler
+    def ts_clean(bold_header=True):
+        return TableStyle([
+            # Hic dolgu yok
+            ("BACKGROUND", (0,0), (-1,-1), colors.white),
             ("FONTSIZE",   (0,0), (-1,-1), 7),
+            ("FONTNAME",   (0,0), (-1,0),  fb),  # baslik bold
             ("ALIGN",      (0,0), (-1,-1), "CENTER"),
+            ("ALIGN",      (0,0), (0,-1),  "LEFT"),   # ilk kolon sol
             ("VALIGN",     (0,0), (-1,-1), "MIDDLE"),
             ("TOPPADDING", (0,0), (-1,-1), 2),
             ("BOTTOMPADDING",(0,0),(-1,-1), 2),
-            ("GRID",       (0,0), (-1,-1), 0.4, C_MGREY),
-            ("LINEBELOW",  (0,0), (-1,0),  0.8, C_BLACK),
+            ("LEFTPADDING", (0,0),(-1,-1), 3),
+            ("RIGHTPADDING",(0,0),(-1,-1), 3),
+            # Dis cerceve kalin
+            ("BOX",        (0,0), (-1,-1), 1.0, colors.black),
+            # Baslik alti kalin cizgi
+            ("LINEBELOW",  (0,0), (-1,0),  1.0, colors.black),
+            # Ic yatay cizgiler ince
+            ("INNERGRID",  (0,0), (-1,-1), 0.3, colors.black),
+            # Alternatif satir golgesi yok - tamamen beyaz
+        ])
+
+    def make_section_title(text):
+        """Bolum basligi - dolgu yok, sadece bold + alt cizgi"""
+        return [
+            Paragraph(text, ps(9, True, colors.black)),
+            HRFlowable(width="100%", thickness=1.0, color=colors.black,
+                       spaceAfter=2),
         ]
-        if row_lines:
-            ts.append(("ROWBACKGROUNDS",(0,1),(-1,-1),[C_WHITE,C_LGREY]))
-        return TableStyle(ts)
 
-    def section_hdr(text):
-        """Bölüm başlığı satırı"""
-        t = Table([[Paragraph(text, sHdr)]], colWidths=[BW])
-        t.setStyle(TableStyle([
-            ("BACKGROUND",(0,0),(-1,-1), C_DARK),
-            ("TOPPADDING",(0,0),(-1,-1), 3),
-            ("BOTTOMPADDING",(0,0),(-1,-1), 3),
-        ]))
-        return t
+    def fmt(v, decimals=4):
+        """Sayi formatlama: nokta yerine virgul"""
+        if isinstance(v, int): return str(v)
+        return f"{v:.{decimals}f}".replace('.', ',')
 
-    # ── Doküman ───────────────────────────────────────────────────────────────
     doc = SimpleDocTemplate(path, pagesize=A4,
         leftMargin=1.5*cm, rightMargin=1.5*cm,
         topMargin=1.5*cm,  bottomMargin=1.5*cm,
         title="NGI Analysis Report")
+
     co = NGI_CUTOFFS[flow]
     story = []
 
-    # ════════════════════════════════════════════════════════════════════════
-    # SAYFA 1 — Kapak + Cihaz/Formülasyon bilgileri (CITDAS sayfa 1 üstü)
-    # ════════════════════════════════════════════════════════════════════════
-    # Başlık bloğu
-    hdr_tbl = Table([
-        [Paragraph("Results and Analysis for Next Generation Impactor", sTitle)],
-        [Paragraph("Ph.Eur 2.9.18 / USP &lt;601&gt;  |  NGI Cascade Impactor Analysis", sSub)],
-    ], colWidths=[BW])
-    hdr_tbl.setStyle(TableStyle([
-        ("BACKGROUND",(0,0),(-1,0), C_DARK),
-        ("BACKGROUND",(0,1),(-1,1), C_MED),
-        ("TOPPADDING",(0,0),(-1,-1),5),
-        ("BOTTOMPADDING",(0,0),(-1,-1),5),
-    ]))
-    story.append(hdr_tbl)
-    story.append(Spacer(1, 3*mm))
+    # =========================================================================
+    # BASLIK BLOGU
+    # =========================================================================
+    if lang=="TR":
+        pdf_main_title = "NGI Kaskadit Impaktor Analiz Araci"
+        pdf_sub_title  = "Ph.Eur 2.9.18 / USP &lt;601&gt;  |  NGI Kaskadi Impaktoru Analizi"
+    else:
+        pdf_main_title = "Results and Analysis for Next Generation Impactor"
+        pdf_sub_title  = "Ph.Eur 2.9.18 / USP &lt;601&gt;  |  NGI Cascade Impactor Analysis"
+    story.append(Paragraph(pdf_main_title, sTitle))
+    story.append(Paragraph(pdf_sub_title, sSub))
+    story.append(HRFlowable(width="100%", thickness=1.5, color=colors.black,
+                             spaceBefore=3, spaceAfter=3))
 
-    # Meta bilgiler (CITDAS formatı: etiket-değer çiftleri)
-    meta_rows = [
-        [Paragraph("Date of Analysis:", sLbl), Paragraph(meta.get("date",""), sVal),
-         Paragraph("Analyst:", sLbl),           Paragraph(meta.get("operator",""), sVal),
-         Paragraph("Flow Rate:", sLbl),          Paragraph(f"{flow} L/min", sValB)],
-        [Paragraph("Product Name:", sLbl),       Paragraph(meta.get("product",""), sVal),
-         Paragraph("Batch Number:", sLbl),       Paragraph(meta.get("batch",""), sVal),
-         Paragraph("Sampling Method:", sLbl),    Paragraph("EP / Ph.Eur 2.9.18", sVal)],
+    # Meta bilgiler - tam genislik 2 kolonlu tablo
+    meta_data = [
+        [Paragraph("Date of Analysis:", sLbl),
+         Paragraph(meta.get("date",""), sVal),
+         Paragraph("Analyst:", sLbl),
+         Paragraph(meta.get("operator",""), sVal),
+         Paragraph("Flow Rate:", sLbl),
+         Paragraph(f"{flow} L/min", sValB)],
+        [Paragraph("Product Name:", sLbl),
+         Paragraph(meta.get("product",""), sVal),
+         Paragraph("Batch Number:", sLbl),
+         Paragraph(meta.get("batch",""), sVal),
+         Paragraph("Method:", sLbl),
+         Paragraph("EP / Ph.Eur 2.9.18", sVal)],
     ]
-    mt = Table(meta_rows, colWidths=[2.5*cm,4*cm,2.5*cm,4*cm,2.5*cm,3.5*cm])
+    cw_meta = [2.5*cm, (BW-5*cm)/2-2.5*cm, 2.5*cm, (BW-5*cm)/2-2.5*cm, 2.5*cm, 2.5*cm]
+    # 3 cift: label+value, esit pay
+    cw_meta = [2.4*cm, 3.4*cm, 2.4*cm, 3.4*cm, 2.2*cm, 3.3*cm]
+    mt = Table(meta_data, colWidths=cw_meta)
     mt.setStyle(TableStyle([
-        ("GRID",(0,0),(-1,-1), 0.3, C_MGREY),
-        ("BACKGROUND",(0,0),(0,-1), C_LGREY),
-        ("BACKGROUND",(2,0),(2,-1), C_LGREY),
-        ("BACKGROUND",(4,0),(4,-1), C_LGREY),
-        ("TOPPADDING",(0,0),(-1,-1),2),
-        ("BOTTOMPADDING",(0,0),(-1,-1),2),
-        ("FONTSIZE",(0,0),(-1,-1),7),
-        ("ALIGN",(0,0),(-1,-1),"LEFT"),
+        ("BACKGROUND", (0,0),(-1,-1), colors.white),
+        ("FONTSIZE",   (0,0),(-1,-1), 7),
+        ("ALIGN",      (0,0),(-1,-1), "LEFT"),
+        ("VALIGN",     (0,0),(-1,-1), "MIDDLE"),
+        ("TOPPADDING", (0,0),(-1,-1), 2),
+        ("BOTTOMPADDING",(0,0),(-1,-1), 2),
+        ("LEFTPADDING", (0,0),(-1,-1), 3),
+        ("BOX",        (0,0),(-1,-1), 0.8, colors.black),
+        ("INNERGRID",  (0,0),(-1,-1), 0.3, colors.black),
     ]))
     story.append(mt)
     story.append(Spacer(1, 3*mm))
 
-    # Cut-off tablosu
+    # Cut-off tablosu - tam sayfa genisliginde
     vis_stages = [s for s in ["S1","S2","S3","S4","S5","S6","S7","MOC"]
                   if co.get(s,999) < 900]
-    co_cw = BW / (len(vis_stages)+1)
-    co_hdr = [Paragraph("Cut-off\nD50 (um)", sLbl)] + \
+    n_co = len(vis_stages) + 1
+    co_cw = [BW/n_co] * n_co
+    co_hdr = [Paragraph("Cut-off D50 (um)", sLbl)] + \
              [Paragraph(s, sLbl) for s in vis_stages]
-    co_val = [Paragraph(f"{flow} L/min", sVal)] + \
-             [Paragraph(f"{co[s]:.3f}", sVal) for s in vis_stages]
-    co_tbl = Table([co_hdr, co_val], colWidths=[co_cw]*(len(vis_stages)+1))
-    co_tbl.setStyle(tbl_style(C_MED))
+    co_val = [Paragraph(f"{flow} L/min", sValB)] + \
+             [Paragraph(fmt(co[s],3), sVal) for s in vis_stages]
+    co_tbl = Table([co_hdr, co_val], colWidths=co_cw)
+    co_tbl.setStyle(ts_clean())
     story.append(co_tbl)
     story.append(Spacer(1, 4*mm))
 
-    # ════════════════════════════════════════════════════════════════════════
-    # Her seri: her run için CITDAS Run sayfası
-    # ════════════════════════════════════════════════════════════════════════
+    # =========================================================================
+    # HER SERI - HER RUN
+    # =========================================================================
     for sd in all_series:
-        ref_tag = "  [REFERANS / REFERENCE]" if sd["is_ref"] else ""
-        # Seri başlık
-        story.append(section_hdr(f"Series: {sd['name']}{ref_tag}  |  {flow} L/min"))
+        ref_tag = "  [REFERENCE]" if sd["is_ref"] else ""
+        for item in make_section_title(f"Series: {sd['name']}{ref_tag}"):
+            story.append(item)
         story.append(Spacer(1, 2*mm))
 
         for run in sd["runs"]:
-            run_items = []  # KeepTogether için
-
-            rh = Table([[Paragraph(f"Run Number = {run['run_no']}  |  "
-                f"Flow Rate = {flow} L/min", sHdr)]],
-                colWidths=[BW])
-            rh.setStyle(TableStyle([
-                ("BACKGROUND",(0,0),(-1,-1), C_MED),
-                ("TOPPADDING",(0,0),(-1,-1),3),
-                ("BOTTOMPADDING",(0,0),(-1,-1),3),
-            ]))
-            run_items.append(rh)
+            run_items = []
+            run_items.append(Paragraph(
+                f"Run Number = {run['run_no']}  |  Sampling Flow Rate = {flow} L/min",
+                ps(8, True, colors.black)))
+            run_items.append(HRFlowable(width="100%", thickness=0.5,
+                color=colors.black, spaceBefore=1, spaceAfter=2))
 
             if "error" in run:
                 run_items.append(Paragraph(
-                    f"  Insufficient data (n={run.get('n',0)})", sVal))
+                    f"Insufficient data (n={run.get('n',0)})", sVal))
                 story.append(KeepTogether(run_items))
-                story.append(Spacer(1, 3*mm))
-                continue
+                story.append(Spacer(1,3*mm)); continue
 
-            # Kümülatif tablo (CITDAS formatı)
-            cum_hdrs = [Paragraph(h, sLbl) for h in [
-                "Cut-off D50\n[um]",
-                "Mass per\ndischarge [mg]",
-                "Cumulative mass\nper discharge [mg]",
-                "Cumulative fraction\ndeposited [%]",
-                "Valid\nPoint",
-                "Probit z",
-            ]]
-            cum_rows = [cum_hdrs]
+            # Kumulatif tablo - tam sayfa genisliginde
+            cum_cols = (["Kesme D50\n[um]","Kutle\n[mg]","Kumulatif\n[mg]",
+                        "Kumulatif\n[%]","Gecerli","Probit z"]
+                if lang=="TR" else
+                ["Cut-off D50\n[um]","Mass\n[mg]","Cumulative mass\n[mg]",
+                 "Cumulative\n[%]","Valid","Probit z"])
+            n_cum = len(cum_cols)
+            # Genislikler: D50=2cm, Mass=2.5cm, CumMass=2.5cm, Cum%=2.5cm, Valid=1.3cm, Probit=kalan
+            cw_cum_fixed = [2.0*cm, 2.5*cm, 2.5*cm, 2.3*cm, 1.3*cm]
+            cw_cum_last  = BW - sum(cw_cum_fixed)
+            cw_cum = cw_cum_fixed + [cw_cum_last]
+
+            cum_hdr_row = [Paragraph(h, sLbl) for h in cum_cols]
+            cum_data = [cum_hdr_row]
             valid_st = {v["stage"] for v in run["valid"]}
             cum_m = 0.0
-            ts_cum = tbl_style(C_MED)
-            for ri, row in enumerate(run["cum_data"]):
-                if row["stage"] not in (["Throat","Presep"]+
-                    [s for s in ALL_KEYS if co.get(s,999)<900]): continue
+            ts_cum = ts_clean()
+            row_idx = 1
+
+            for row in run["cum_data"]:
+                s = row["stage"]
+                # Sadece ISM stage ve Throat goster
+                if s not in (["Throat"] + [x for x in ALL_KEYS if co.get(x,999)<900]):
+                    continue
                 cum_m += row["mass"]
-                iv = row["stage"] in valid_st
+                iv = s in valid_st
                 pz = ""
                 if 0 < row["u_pct"] < 100:
-                    try: pz = f"{norm.ppf(row['u_pct']/100):.4f}"
+                    try: pz = fmt(norm.ppf(row["u_pct"]/100), 4)
                     except: pass
-                d50_str = f"{row['d50']:.3f}" if row['d50']<900 else "---"
-                cum_rows.append([
+                d50_str = fmt(row["d50"],3) if row["d50"]<900 else "---"
+                cum_data.append([
                     Paragraph(d50_str, sVal),
-                    Paragraph(f"{row['mass']:.4f}", sVal),
-                    Paragraph(f"{cum_m:.4f}", sVal),
-                    Paragraph(f"{row['u_pct']:.3f}", sVal),
+                    Paragraph(fmt(row["mass"],4), sValB if iv else sVal),
+                    Paragraph(fmt(cum_m,4), sVal),
+                    Paragraph(fmt(row["u_pct"],3), sValB if iv else sVal),
                     Paragraph("*" if iv else "", sValB),
                     Paragraph(pz, sVal),
                 ])
                 if iv:
-                    ts_cum.add("BACKGROUND",(0,ri+1),(-1,ri+1),C_HILITE)
-                    ts_cum.add("FONTNAME",(0,ri+1),(-1,ri+1),fb)
+                    # Valid satirlari: sadece bold, dolgu yok
+                    ts_cum.add("FONTNAME",(0,row_idx),(-1,row_idx), fb)
+                    ts_cum.add("LINEABOVE",(0,row_idx),(-1,row_idx), 0.5, colors.black)
+                    ts_cum.add("LINEBELOW",(0,row_idx),(-1,row_idx), 0.5, colors.black)
+                row_idx += 1
 
-            cw_cum = [2*cm, 2.5*cm, 3.2*cm, 3.2*cm, 1.3*cm, 2.2*cm]
-            t_cum = Table(cum_rows, colWidths=cw_cum, repeatRows=1)
+            t_cum = Table(cum_data, colWidths=cw_cum, repeatRows=1)
             t_cum.setStyle(ts_cum)
             run_items.append(t_cum)
-            run_items.append(Spacer(1, 2*mm))
+            run_items.append(Spacer(1,2*mm))
 
-            # Parametreler satırı (CITDAS formatı: 2 satır)
-            param_row1_h = [Paragraph(h, sLbl) for h in
-                ["Less than/Equal\n5.000 um [mg]","MMAD [um]","GSD",
-                 "Intercept","Slope","R^2","n"]]
-            param_row1_v = [
-                Paragraph(f"{run['fpd']:.4f}", sHl),
-                Paragraph(f"{run['mmad']:.4f}", sHl),
-                Paragraph(f"{run['gsd']:.4f}", sHl),
-                Paragraph(f"{run['intercept']:.3f}", sVal),
-                Paragraph(f"{run['slope']:.3f}", sVal),
-                Paragraph(f"{run['r2']:.4f}", sVal),
-                Paragraph(str(run['n']), sVal),
-            ]
-            param_row2_h = [Paragraph(h, sLbl) for h in
-                ["Fine Particle\nFraction [%]","Metered [mg]","Delivered [mg]",
-                 "","","",""]]
-            param_row2_v = [
-                Paragraph(f"{run['fpf']:.3f}", sHl),
-                Paragraph(f"{run['metered']:.4f}", sVal),
-                Paragraph(f"{run['delivered']:.4f}", sVal),
-                Paragraph("", sVal),
-                Paragraph("", sVal),
-                Paragraph("", sVal),
-                Paragraph("", sVal),
-            ]
-            cw_p = [2.5*cm]*7
-            t_p1 = Table([param_row1_h, param_row1_v], colWidths=cw_p)
-            t_p1.setStyle(tbl_style(C_MED))
-            t_p2 = Table([param_row2_h, param_row2_v], colWidths=cw_p)
-            t_p2.setStyle(tbl_style(C_MED))
-            run_items.append(t_p1)
-            run_items.append(Spacer(1, 1*mm))
-            run_items.append(t_p2)
-            run_items.append(Spacer(1, 3*mm))
+            # Parametreler - 2 satir, tam sayfa
+            # Satir 1: FPD, MMAD, GSD, Intercept, Slope, R2, n
+            p1_h = ["FPD (<=5um)\n[mg]","MMAD\n[um]","GSD",
+                    "Intercept","Slope","R^2","n"]
+            p1_v = [fmt(run["fpd"],4), fmt(run["mmad"],4), fmt(run["gsd"],4),
+                    fmt(run["intercept"],3), fmt(run["slope"],3),
+                    fmt(run["r2"],4), str(run["n"])]
+            # Satir 2: FPF, Metered, Delivered
+            p2_h = ["Fine Particle\nFraction [%]","Metered\n[mg]",
+                    "Delivered\n[mg]","","","",""]
+            p2_v = [fmt(run["fpf"],3), fmt(run["metered"],4),
+                    fmt(run["delivered"],4),"","","",""]
 
+            n_p = len(p1_h)
+            cw_p = [BW/n_p]*n_p
+            t_p = Table(
+                [[Paragraph(h,sLbl) for h in p1_h],
+                 [Paragraph(v,sValB if i<3 else sVal) for i,v in enumerate(p1_v)],
+                 [Paragraph(h,sLbl) for h in p2_h],
+                 [Paragraph(v,sValB if i<3 else sVal) for i,v in enumerate(p2_v)]],
+                colWidths=cw_p)
+            ts_p = ts_clean()
+            # Baslik satirlari (0 ve 2) bold, deger satirlari (1 ve 3) normal
+            ts_p.add("FONTNAME",(0,2),(-1,2), fb)
+            ts_p.add("LINEABOVE",(0,2),(-1,2), 1.0, colors.black)
+            t_p.setStyle(ts_p)
+            run_items.append(t_p)
+            run_items.append(Spacer(1,3*mm))
             story.append(KeepTogether(run_items))
 
-        story.append(Spacer(1, 2*mm))
+        story.append(Spacer(1,2*mm))
 
-    # ════════════════════════════════════════════════════════════════════════
-    # SAYFA 2 — Tabular Summary (CITDAS tabular summary sayfası)
-    # ════════════════════════════════════════════════════════════════════════
+    # =========================================================================
+    # TABULAR SUMMARY
+    # =========================================================================
     story.append(PageBreak())
-    story.append(section_hdr("Tabular Summary — Measured Drug Collected in NGI Stages per Discharge"))
-    story.append(Spacer(1, 3*mm))
+    for item in make_section_title("Tabular Summary — NGI Stage Masses per Discharge"):
+        story.append(item)
+    story.append(Spacer(1,3*mm))
 
     for sd in all_series:
         valid_runs = [r for r in sd["runs"] if "error" not in r]
@@ -1110,77 +1179,80 @@ def make_pdf_multi(path,all_series,meta,flow,T,limit_pct=20,rsd_lim=5.0):
 
         story.append(Paragraph(
             f"Series: {sd['name']}" + ("  [REF]" if sd["is_ref"] else ""),
-            ps(8, True, C_DARK)))
-        story.append(Spacer(1, 1*mm))
+            ps(8, True, colors.black)))
+        story.append(Spacer(1,1*mm))
 
-        # Stage kütleleri tablosu (CITDAS tabular format)
-        # Kolonlar: Stage | Run1 | Run2 | Run3 | Mean | SD | %RSD
-        disp_stages = ["Device","Throat","Presep"] + \
-                      [s for s in ["S1","S2","S3","S4","S5","S6","S7","MOC"]]
-        t_hdr = ([Paragraph("Stage", sLbl)] +
-                 [Paragraph(f"Run {r['run_no']}", sLbl) for r in valid_runs] +
-                 [Paragraph("Mean", sLbl), Paragraph("SD", sLbl),
-                  Paragraph("%RSD", sLbl)])
-        col_w_ts = [1.8*cm] + [2*cm]*n_r + [2*cm, 1.8*cm, 1.8*cm]
-        tab_rows = [t_hdr]
-        for s in disp_stages:
+        # Stage kutleleri - tam genislik
+        disp_s = [s for s in ["Throat","Presep","S1","S2","S3","S4","S5","S6","S7","MOC"]]
+        ts_hdr = ([Paragraph("Stage",sLbl)] +
+                  [Paragraph(f"Run {r['run_no']}",sLbl) for r in valid_runs] +
+                  [Paragraph("Mean",sLbl),Paragraph("SD",sLbl),Paragraph("%RSD",sLbl)])
+        n_ts_col = 1 + n_r + 3
+        cw_ts_lbl = 1.8*cm
+        cw_ts_rest = (BW - cw_ts_lbl) / (n_r+3)
+        cw_ts = [cw_ts_lbl] + [cw_ts_rest]*(n_r+3)
+
+        ts_rows = [ts_hdr]
+        for s in disp_s:
             vals = [r["masses"].get(s,0) for r in valid_runs]
             if all(v==0 for v in vals): continue
             mean_v = float(np.mean(vals))
             sd_v   = float(np.std(vals,ddof=1)) if len(vals)>1 else 0.0
             rsd_v  = sd_v/mean_v*100 if mean_v else 0.0
-            row = ([Paragraph(s, sLbl)] +
-                   [Paragraph(f"{v:.4f}", sVal) for v in vals] +
-                   [Paragraph(f"{mean_v:.4f}", sValB),
-                    Paragraph(f"{sd_v:.4f}", sVal),
-                    Paragraph(f"{rsd_v:.2f}", sVal)])
-            tab_rows.append(row)
-        t_tab = Table(tab_rows, colWidths=col_w_ts, repeatRows=1)
-        t_tab.setStyle(tbl_style(C_MED))
-        story.append(t_tab)
-        story.append(Spacer(1, 3*mm))
+            ts_rows.append(
+                [Paragraph(s, sLbl)] +
+                [Paragraph(fmt(v,4),sVal) for v in vals] +
+                [Paragraph(fmt(mean_v,4),sValB),
+                 Paragraph(fmt(sd_v,4),sVal),
+                 Paragraph(fmt(rsd_v,2),sVal)])
+        t_ts = Table(ts_rows, colWidths=cw_ts, repeatRows=1)
+        t_ts.setStyle(ts_clean())
+        story.append(t_ts)
+        story.append(Spacer(1,3*mm))
 
-        # Parametre özet tablosu (CITDAS dose/characterisation tablosu)
-        story.append(Paragraph("Dose and Post-Throat Particle Size Characterisation", ps(7,True,C_DARK)))
+        # Parametre ozet - tam genislik
+        story.append(Paragraph("Dose and Particle Size Characterisation",
+            ps(7,True,colors.black)))
         story.append(Spacer(1,1*mm))
         pkeys = [("metered","Metered [mg]"),("delivered","Delivered [mg]"),
                  ("fpd","FPD [mg]"),("fpf","FPF [%]"),
                  ("mmad","MMAD [um]"),("gsd","GSD"),
                  ("slope","Slope"),("intercept","Intercept"),("r2","R^2")]
-        p_hdr = ([Paragraph("Parameter",sLbl)] +
-                 [Paragraph(f"Run {r['run_no']}",sLbl) for r in valid_runs] +
-                 [Paragraph("Mean",sLbl),Paragraph("SD",sLbl),Paragraph("%RSD",sLbl)])
-        p_cw = [2.5*cm]+[2*cm]*n_r+[2*cm,1.8*cm,1.8*cm]
-        p_rows = [p_hdr]
+        p_hdr2 = ([Paragraph("Parameter",sLbl)] +
+                  [Paragraph(f"Run {r['run_no']}",sLbl) for r in valid_runs] +
+                  [Paragraph("Mean",sLbl),Paragraph("SD",sLbl),Paragraph("%RSD",sLbl)])
+        cw_p2 = [2.8*cm] + [(BW-2.8*cm)/(n_r+3)]*(n_r+3)
+        p_rows2 = [p_hdr2]
         for k,lbl in pkeys:
             vals2 = [r.get(k,0) for r in valid_runs if k in r]
             if not vals2: continue
-            mean2=float(np.mean(vals2)); sd2=float(np.std(vals2,ddof=1)) if len(vals2)>1 else 0.0
+            mean2=float(np.mean(vals2))
+            sd2=float(np.std(vals2,ddof=1)) if len(vals2)>1 else 0.0
             rsd2=sd2/mean2*100 if mean2 else 0.0
             is_key = k in ("fpd","fpf","mmad","gsd")
-            sv = sHl if is_key else sVal
-            row2 = ([Paragraph(lbl, sLbl if not is_key else ps(7,True,C_DARK))] +
-                    [Paragraph(f"{r.get(k,0):.4f}", sv) for r in valid_runs] +
-                    [Paragraph(f"{mean2:.4f}", sv),
-                     Paragraph(f"{sd2:.4f}", sVal),
-                     Paragraph(f"{rsd2:.3f}",
-                         sVal if rsd2<=rsd_lim else
-                         ps(7,True,colors.red))])
-            p_rows.append(row2)
-        t_p = Table(p_rows, colWidths=p_cw, repeatRows=1)
-        t_p.setStyle(tbl_style(C_MED))
-        story.append(t_p)
-        story.append(Spacer(1,4*mm))
+            sv = ps(7,True,colors.black,TA_CENTER) if is_key else sVal
+            rsd_style = sRed if rsd2 > rsd_lim else sVal
+            p_rows2.append(
+                [Paragraph(lbl, sLbl if not is_key else ps(7,True,colors.black))] +
+                [Paragraph(fmt(r.get(k,0),4),sv) for r in valid_runs] +
+                [Paragraph(fmt(mean2,4),sv),
+                 Paragraph(fmt(sd2,4),sVal),
+                 Paragraph(fmt(rsd2,2),rsd_style)])
+        t_p2 = Table(p_rows2, colWidths=cw_p2, repeatRows=1)
+        t_p2.setStyle(ts_clean())
+        story.append(t_p2)
+        story.append(Spacer(1,5*mm))
 
-    # ════════════════════════════════════════════════════════════════════════
-    # SAYFA 3 — Referans karşılaştırma (sadece referans seçildiyse)
-    # ════════════════════════════════════════════════════════════════════════
+    # =========================================================================
+    # REFERANS KARSILASTIRMA
+    # =========================================================================
     ref_sd = next((sd for sd in all_series if sd["is_ref"]), None)
     if ref_sd and ref_sd["avg"]:
         story.append(PageBreak())
-        story.append(section_hdr(
-            f"Reference Comparison — {ref_sd['name']}  |  Limit: +/-{limit_pct:.0f}%"))
-        story.append(Spacer(1, 3*mm))
+        for item in make_section_title(
+            f"Reference Comparison — {ref_sd['name']}  |  Limit: +/-{limit_pct:.0f}%"):
+            story.append(item)
+        story.append(Spacer(1,3*mm))
 
         ref_m = ref_sd["avg"]["avg_masses"]
         vis_cmp = ["Throat"] + [s for s in GRAPH_STAGES if co.get(s,999)<900]
@@ -1188,54 +1260,49 @@ def make_pdf_multi(path,all_series,meta,flow,T,limit_pct=20,rsd_lim=5.0):
 
         for sd in test_series:
             f2 = calc_f2(ref_m, sd["avg"]["avg_masses"], co)
-            f2_txt = f"f2 = {f2:.1f}  ({'Similar (>=50)' if f2>=50 else 'Different (<50)'})" \
-                     if f2 else "-"
-            f2_clr = colors.HexColor("#006600") if (f2 and f2>=50) else colors.red
-            f2_bg  = C_GREEN if (f2 and f2>=50) else C_RED
-            f2_hdr = Table([[Paragraph(
-                f"{sd['name']}   |   {f2_txt}", ps(8,True,f2_clr))]],
-                colWidths=[BW])
-            f2_hdr.setStyle(TableStyle([
-                ("BACKGROUND",(0,0),(-1,-1),f2_bg),
-                ("TOPPADDING",(0,0),(-1,-1),3),
-                ("BOTTOMPADDING",(0,0),(-1,-1),3),
-            ]))
-            story.append(f2_hdr)
+            f2_pass = f2 is not None and f2 >= 50
+            f2_txt = f"f2 = {fmt(f2,1)}  " + \
+                     ("Similar (>=50)" if f2_pass else "Different (<50)") \
+                     if f2 else "f2 = N/A"
+            story.append(Paragraph(f"{sd['name']}   |   {f2_txt}",
+                ps(8, True, colors.black)))
+            story.append(Spacer(1,1*mm))
 
-            # Stagewise karşılaştırma
             cmp_hdr = [Paragraph(h,sLbl) for h in
-                ["Stage","Reference [mg]","Test [mg]","Diff %",
-                 f"+/-{limit_pct:.0f}% Upper","Lower","Result"]]
+                ["Stage","Reference\n[mg]","Test\n[mg]",
+                 "Diff %",f"Upper\n+{limit_pct:.0f}%",
+                 f"Lower\n-{limit_pct:.0f}%","Result"]]
+            cmp_cw = [BW/7]*7
             cmp_rows = [cmp_hdr]
-            ts_cmp = tbl_style(C_MED)
+            ts_cmp = ts_clean()
             for ri2, s in enumerate(vis_cmp):
-                rv = ref_m.get(s, 0)
-                tv = sd["avg"]["avg_masses"].get(s, 0)
+                rv = ref_m.get(s,0); tv = sd["avg"]["avg_masses"].get(s,0)
                 diff = (tv-rv)/rv*100 if rv else 0.0
                 in_lim = abs(diff) <= limit_pct
-                res_s = ps(7,True, colors.HexColor("#006600") if in_lim else colors.red)
+                res_clr = colors.HexColor("#006600") if in_lim else colors.red
                 cmp_rows.append([
                     Paragraph(s, sLbl),
-                    Paragraph(f"{rv:.4f}", sVal),
-                    Paragraph(f"{tv:.4f}", sVal),
-                    Paragraph(f"{diff:+.2f}%", sVal),
-                    Paragraph(f"{rv*(1+limit_pct/100):.4f}", sVal),
-                    Paragraph(f"{rv*(1-limit_pct/100):.4f}", sVal),
-                    Paragraph("PASS" if in_lim else "FAIL", res_s),
+                    Paragraph(fmt(rv,4), sVal),
+                    Paragraph(fmt(tv,4), sVal),
+                    Paragraph(f"{diff:+,.2f}%".replace('.',','), sVal),
+                    Paragraph(fmt(rv*(1+limit_pct/100),4), sVal),
+                    Paragraph(fmt(rv*(1-limit_pct/100),4), sVal),
+                    Paragraph("PASS" if in_lim else "FAIL",
+                        ps(7,True,colors.black,TA_CENTER)),
                 ])
                 if not in_lim:
-                    ts_cmp.add("BACKGROUND",(0,ri2+1),(-1,ri2+1),C_RED)
-            cmp_cw = [1.5*cm,2.5*cm,2.5*cm,1.8*cm,2.8*cm,2.8*cm,1.5*cm]
+                    ts_cmp.add("FONTNAME",(0,ri2+1),(-1,ri2+1),fb)
             t_cmp = Table(cmp_rows, colWidths=cmp_cw, repeatRows=1)
             t_cmp.setStyle(ts_cmp)
             story.append(t_cmp)
-            story.append(Spacer(1,3*mm))
+            story.append(Spacer(1,4*mm))
 
-    # ════════════════════════════════════════════════════════════════════════
-    # GRAFIK SAYFASI — Log-Probit + APSD (siyah beyaz)
-    # ════════════════════════════════════════════════════════════════════════
+    # =========================================================================
+    # GRAFIK SAYFASI
+    # =========================================================================
     story.append(PageBreak())
-    story.append(section_hdr("Graphical Analysis"))
+    for item in make_section_title("Graphical Analysis"):
+        story.append(item)
     story.append(Spacer(1,3*mm))
 
     import io as _io
@@ -1243,10 +1310,10 @@ def make_pdf_multi(path,all_series,meta,flow,T,limit_pct=20,rsd_lim=5.0):
     import matplotlib.pyplot as _plt
     from reportlab.platypus import Image as RLImage
 
-    BW_COLORS = ["black","#333333","#555555","#777777","#999999","#BBBBBB"]
+    BW_COLORS = ["black","#333","#555","#777","#999","#BBB"]
     BW_LS     = ["-","--","-.",":",(0,(5,1)),(0,(3,1,1,1))]
 
-    # ── Log-Probit ────────────────────────────────────────────────────────────
+    # Log-Probit
     fig_lp, ax_lp = _plt.subplots(figsize=(7,3.8))
     ax_lp.set_facecolor("white"); fig_lp.patch.set_facecolor("white")
     for si, sd in enumerate(all_series):
@@ -1255,40 +1322,60 @@ def make_pdf_multi(path,all_series,meta,flow,T,limit_pct=20,rsd_lim=5.0):
         col = BW_COLORS[si % len(BW_COLORS)]
         ls  = BW_LS[si % len(BW_LS)]
         lw  = 2.0 if sd["is_ref"] else 1.3
-        # Seri ortalaması
         min_len = min(len(r["x_reg"]) for r in valid_runs)
-        avg_x = sum(r["x_reg"][:min_len] for r in valid_runs) / len(valid_runs)
-        avg_y = sum(r["y_reg"][:min_len] for r in valid_runs) / len(valid_runs)
-        ax_lp.plot(avg_x, avg_y, "o", color=col, ms=5, zorder=4)
+        avg_x = sum(r["x_reg"][:min_len] for r in valid_runs)/len(valid_runs)
+        avg_y = sum(r["y_reg"][:min_len] for r in valid_runs)/len(valid_runs)
         b_avg = sum(r["b"] for r in valid_runs)/len(valid_runs)
         a_avg = sum(r["a"] for r in valid_runs)/len(valid_runs)
+        ax_lp.plot(avg_x, avg_y, "o", color=col, ms=5, zorder=4)
         xr = np.linspace(min(avg_x)-0.15, max(avg_x)+0.15, 60)
         ax_lp.plot(xr, a_avg+b_avg*xr, ls=ls, color=col, lw=lw,
-            label=sd["name"] + (" ★" if sd["is_ref"] else ""))
-        # MMAD dikey çizgi
+            label=sd["name"]+(" [REF]" if sd["is_ref"] else ""))
         if sd["avg"] and "mmad" in sd["avg"]["params"]:
             mv = sd["avg"]["params"]["mmad"][0]
             if mv > 0:
                 ax_lp.axvline(math.log10(mv), color=col, lw=0.7, ls=":", alpha=0.8)
-                ax_lp.text(math.log10(mv)+0.01, ax_lp.get_ylim()[0]+0.05 if ax_lp.get_ylim()[0]>-3 else -2.8,
-                    f"MMAD={mv:.2f}", fontsize=6, color=col, va="bottom")
-    ax_lp.set_xlabel("log$_{10}$(D50, µm)", fontsize=9)
+    ax_lp.set_xlabel("log10(D50, um)", fontsize=9)
     ax_lp.set_ylabel("Probit z", fontsize=9)
-    ax_lp.set_title(f"Log-Probit Analysis  [{flow} L/min]  (Series Means)", fontsize=10, fontweight="bold")
-    ax_lp.legend(fontsize=7, loc="lower right", framealpha=0.8)
-    ax_lp.grid(True, ls="--", alpha=0.35, color="gray")
+    ax_lp.set_title(f"Log-Probit  [{flow} L/min]  (Series Averages)", fontsize=10)
+    ax_lp.legend(fontsize=7, framealpha=0.9)
+    ax_lp.grid(True, ls="--", alpha=0.3, color="gray")
     ax_lp.tick_params(labelsize=8)
+    for sp in ax_lp.spines.values(): sp.set_color("black"); sp.set_linewidth(0.8)
     fig_lp.tight_layout()
     buf_lp = _io.BytesIO()
-    fig_lp.savefig(buf_lp, format="png", dpi=150, bbox_inches="tight")
+    fig_lp.savefig(buf_lp, format="png", dpi=150, bbox_inches="tight", facecolor="white")
     buf_lp.seek(0); _plt.close(fig_lp)
     story.append(RLImage(buf_lp, width=BW, height=BW*3.8/7))
-    story.append(Spacer(1,4*mm))
 
-    # ── APSD dağılım ──────────────────────────────────────────────────────────
+    # Log-Probit alti: MMAD degerleri tablosu
+    mmad_rows = [[Paragraph("Series", sLbl),
+                  Paragraph("MMAD [um]", sLbl),
+                  Paragraph("GSD", sLbl),
+                  Paragraph("Slope", sLbl),
+                  Paragraph("Intercept", sLbl),
+                  Paragraph("R^2", sLbl)]]
+    for sd2 in all_series:
+        if not sd2["avg"]: continue
+        pr = sd2["avg"]["params"]
+        mmad_rows.append([
+            Paragraph(sd2["name"] + (" [REF]" if sd2["is_ref"] else ""), sLbl),
+            Paragraph(fmt(pr.get("mmad",(0,))[0], 3), sValB),
+            Paragraph(fmt(pr.get("gsd",(0,))[0], 3), sVal),
+            Paragraph(fmt(pr.get("slope",(0,))[0], 3), sVal),
+            Paragraph(fmt(pr.get("intercept",(0,))[0], 3), sVal),
+            Paragraph(fmt(pr.get("r2",(0,))[0], 4), sVal),
+        ])
+    n_mc = len(mmad_rows[0])
+    t_mmad = Table(mmad_rows, colWidths=[BW/n_mc]*n_mc)
+    t_mmad.setStyle(ts_clean())
+    story.append(t_mmad)
+    story.append(Spacer(1,5*mm))
+
+    # APSD
     vis_ap = ["Throat"] + [s for s in ["S1","S2","S3","S4","S5","S6","S7","MOC"]
                             if co.get(s,999)<900]
-    x_ap = range(len(vis_ap))
+    x_ap = list(range(len(vis_ap)))
     fig_ap, ax_ap = _plt.subplots(figsize=(7,3.8))
     ax_ap.set_facecolor("white"); fig_ap.patch.set_facecolor("white")
     ref_ap = None
@@ -1303,42 +1390,39 @@ def make_pdf_multi(path,all_series,meta,flow,T,limit_pct=20,rsd_lim=5.0):
         for s in vis_ap:
             vals=[r["masses"].get(s,0) for r in valid_runs]
             sds_ap.append(float(np.std(vals,ddof=1)) if len(vals)>1 else 0.0)
-        ax_ap.plot(list(x_ap), ms_ap, "o"+ls, color=col, lw=lw, ms=5,
-            label=sd["name"] + (" ★" if sd["is_ref"] else ""))
-        ax_ap.fill_between(list(x_ap),
-            [m-s for m,s in zip(ms_ap,sds_ap)],
-            [m+s for m,s in zip(ms_ap,sds_ap)],
-            color=col, alpha=0.08)
+        ax_ap.plot(x_ap, ms_ap, "o"+ls, color=col, lw=lw, ms=5,
+            label=sd["name"]+(" [REF]" if sd["is_ref"] else ""))
+        ax_ap.fill_between(x_ap, [m-s for m,s in zip(ms_ap,sds_ap)],
+            [m+s for m,s in zip(ms_ap,sds_ap)], color=col, alpha=0.08)
         if sd["is_ref"]: ref_ap = ms_ap
     if ref_ap:
         up = [v*(1+limit_pct/100) for v in ref_ap]
         lo = [v*(1-limit_pct/100) for v in ref_ap]
-        ax_ap.plot(list(x_ap), up, "--", color="black", lw=0.8, alpha=0.6,
+        ax_ap.plot(x_ap, up, "--", color="black", lw=0.8, alpha=0.7,
             label=f"+{limit_pct:.0f}%")
-        ax_ap.plot(list(x_ap), lo, "--", color="black", lw=0.8, alpha=0.6,
+        ax_ap.plot(x_ap, lo, "--", color="black", lw=0.8, alpha=0.7,
             label=f"-{limit_pct:.0f}%")
-        ax_ap.fill_between(list(x_ap), lo, up, color="lightgray", alpha=0.25)
-    ax_ap.set_xticks(list(x_ap))
-    ax_ap.set_xticklabels(vis_ap, rotation=20, ha="right", fontsize=8)
+    ax_ap.set_xticks(x_ap); ax_ap.set_xticklabels(vis_ap, rotation=20, ha="right", fontsize=8)
     ax_ap.set_xlabel("Stage", fontsize=9)
     ax_ap.set_ylabel("Mean Mass (mg/actuation)", fontsize=9)
-    ax_ap.set_title(f"APSD Distribution  [{flow} L/min]  (Series Means +/- SD)", fontsize=10, fontweight="bold")
-    ax_ap.legend(fontsize=7, loc="upper right", framealpha=0.8)
-    ax_ap.grid(True, ls="--", alpha=0.35, color="gray")
+    ax_ap.set_title(f"APSD Distribution  [{flow} L/min]  (Series Averages +/- SD)", fontsize=10)
+    ax_ap.legend(fontsize=7, framealpha=0.9)
+    ax_ap.grid(True, ls="--", alpha=0.3, color="gray")
     ax_ap.tick_params(labelsize=8)
+    for sp in ax_ap.spines.values(): sp.set_color("black"); sp.set_linewidth(0.8)
     fig_ap.tight_layout()
     buf_ap = _io.BytesIO()
-    fig_ap.savefig(buf_ap, format="png", dpi=150, bbox_inches="tight")
+    fig_ap.savefig(buf_ap, format="png", dpi=150, bbox_inches="tight", facecolor="white")
     buf_ap.seek(0); _plt.close(fig_ap)
     story.append(RLImage(buf_ap, width=BW, height=BW*3.8/7))
 
-    # ── Footer ────────────────────────────────────────────────────────────────
+    # Footer
     story.append(Spacer(1,4*mm))
-    story.append(HRFlowable(width="100%",thickness=0.5,color=C_MGREY))
+    story.append(HRFlowable(width="100%", thickness=0.8, color=colors.black))
     story.append(Paragraph(
         f"NGI Analysis Tool v5  |  Ph.Eur 2.9.18 / USP &lt;601&gt;  |  "
         f"Generated: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
-        ps(6.5, False, C_MED, TA_CENTER)))
+        ps(6.5, False, colors.black, TA_CENTER)))
 
     doc.build(story)
 
