@@ -238,11 +238,22 @@ def parse_csv(path):
     if not lines:
         return None, None, ["Dosya bos"]
 
-    # Ayrac tespit: ; mi , mi?
-    sep = ";" if lines[0].count(";") > lines[0].count(",") else ","
-    # Header satiri
-    hdr_raw = lines[0].split(sep)
-    hdr = [h.strip().lower().replace(" ","_") for h in hdr_raw]
+    # Ayrac tespit: tum dosyaya bak
+    sep = ";" if raw.count(";") > raw.count(",") else ","
+
+    # Gercek header satirini bul: "seri" VE ("run" veya "flow") iceren ilk satir
+    # Basi aciklama satirlarini otomatik atla
+    hdr_idx = None
+    for i, line in enumerate(lines):
+        cols = [c.strip().lower() for c in line.split(sep)]
+        if "seri" in cols and ("run" in cols or "flow" in cols):
+            hdr_idx = i
+            break
+    if hdr_idx is None:
+        return None, None, ["Header satiri bulunamadi. 'Seri', 'Run', 'Flow' kolonlari olmali."]
+
+    hdr = [h.strip().lower().replace(" ","_") for h in lines[hdr_idx].split(sep)]
+    lines = lines[hdr_idx+1:]  # Veri satirlari header sonrasindan baslar
 
     # Zorunlu kolonlari kontrol et
     missing = [c for c in ["seri","run","flow","throat","s1"] if c not in hdr]
