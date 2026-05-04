@@ -59,7 +59,7 @@ L = {
  "f2_label":"f2 Benzerlik Faktoru","f2_pass":">=50 Benzer","f2_fail":"<50 Farkli",
  "outside_warn":"UYARI: Limit disi noktalar","no_ref":"Referans secilmedi",
  "ddu_label":"DDU Analizi","trend_label":"Trend Grafigi",
- "rsd_limit":"RSD Kabul (%)","cv_label":"CV%",
+ "rsd_limit":"RSD Kabul (%)","cv_label":"CV%","load_csv":"CSV Yukle","csv_template":"Sablon","csv_loaded":"CSV yuklendi: {n} seri, {r} run","csv_err_format":"CSV format hatasi: Beklenen kolonlar eksik","csv_err_flow":"Uyari: Farkli flow hizlari tespit edildi","csv_ref_ask":"Referans seri secin","csv_ref_none":"Referans yok (atla)","csv_4runs":"Uyari: {s} serisi 3den fazla run iceriyor, ilk 3 alindi",
  "stage":"Stage","mass_mg":"Kutle (mg)","cum_mass":"Kum. Kutle",
  "cum_pct":"Kum. %","valid_pt":"Gecerli","probit_z":"Probit z",
  "param":"Parametre","accept":"Kabul","fail_lbl":"BASARISIZ",
@@ -91,7 +91,7 @@ L = {
  "f2_label":"f2 Similarity Factor","f2_pass":">=50 Similar","f2_fail":"<50 Different",
  "outside_warn":"WARNING: Points outside limits","no_ref":"No reference selected",
  "ddu_label":"DDU Analysis","trend_label":"Trend Chart",
- "rsd_limit":"RSD Accept (%)","cv_label":"CV%",
+ "rsd_limit":"RSD Accept (%)","cv_label":"CV%","load_csv":"Load CSV","csv_template":"Template","csv_loaded":"CSV loaded: {n} series, {r} runs","csv_err_format":"CSV format error: Expected columns missing","csv_err_flow":"Warning: Multiple flow rates detected","csv_ref_ask":"Select reference series","csv_ref_none":"No reference (skip)","csv_4runs":"Warning: {s} has more than 3 runs, first 3 taken",
  "stage":"Stage","mass_mg":"Mass (mg)","cum_mass":"Cum. Mass",
  "cum_pct":"Cum. %","valid_pt":"Valid","probit_z":"Probit z",
  "param":"Parameter","accept":"Accept","fail_lbl":"FAIL",
@@ -221,6 +221,107 @@ def parse_paste(text):
     return result if result else None
 
 DISP_STAGES=["Throat","Presep","S1","S2","S3","S4","S5","S6","S7","MOC"]
+REQUIRED_COLS = ["seri","run","flow","throat","s1","s2","s3","s4","s5","s6","s7","moc"]
+
+def parse_csv(path):
+    """CSV dosyasini oku, seri/run gruplarini dondur.
+    Return: (series_dict, flow, warnings)
+    series_dict: {seri_adi: {"runs":[{stage:val}], "ref":bool}}
+    """
+    import csv, re
+    warnings = []
+    series_dict = {}  # {ad: {"runs":[], "ref":False}}
+    flow_vals = set()
+
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        raw = f.read()
+    lines = [l.strip() for l in raw.splitlines() if l.strip()]
+    if not lines:
+        return None, None, ["Dosya bos"]
+
+    # Ayrac tespit: ; mi , mi?
+    sep = ";" if lines[0].count(";") > lines[0].count(",") else ","
+    # Header satiri
+    hdr_raw = lines[0].split(sep)
+    hdr = [h.strip().lower().replace(" ","_") for h in hdr_raw]
+
+    # Zorunlu kolonlari kontrol et
+    missing = [c for c in ["seri","run","flow","throat","s1"] if c not in hdr]
+    if missing:
+        return None, None, [f"Eksik kolon: {missing}"]
+
+    def to_float(s):
+        if s is None or str(s).strip() == "": return 0.0
+        v = str(s).strip()
+        # Hem 1.234 hem 1,234 formatini destekle
+        # Eger sadece bir virgul varsa ve nokta yoksa: ondalik virgul
+        if v.count(",") == 1 and "." not in v:
+            v = v.replace(",", ".")
+        elif v.count(",") > 1:
+            # Binlik ayrac virgul: "1,234.56" -> "1234.56"
+            v = v.replace(",", "")
+        return float(v)
+
+    ref_col = "referans" in hdr
+
+    for line in lines[1:]:
+        # Bos satiri atla
+        if not line.replace(",","").strip():
+            continue
+        parts = line.split(sep)
+        # Kolonlari map et
+        row = {}
+        for i, h in enumerate(hdr):
+            row[h] = parts[i].strip() if i < len(parts) else ""
+
+        seri = row.get("seri","").strip()
+        if not seri: continue
+
+        try:
+            run_no = int(float(row.get("run","1") or "1"))
+            flow_v = int(float(row.get("flow","60") or "60"))
+        except:
+            continue
+
+        flow_vals.add(flow_v)
+
+        is_ref = False
+        if ref_col:
+            ref_val = row.get("referans","0").strip()
+            is_ref = ref_val in ("1","1.0","evet","yes","true","referans","ref")
+
+        # Kutleleri al
+        masses = {
+            "Device": 0.0,
+            "Throat": to_float(row.get("throat")),
+            "Presep": to_float(row.get("presep")),
+            "S1": to_float(row.get("s1")),
+            "S2": to_float(row.get("s2")),
+            "S3": to_float(row.get("s3")),
+            "S4": to_float(row.get("s4")),
+            "S5": to_float(row.get("s5")),
+            "S6": to_float(row.get("s6")),
+            "S7": to_float(row.get("s7")),
+            "MOC": to_float(row.get("moc")),
+        }
+
+        if seri not in series_dict:
+            series_dict[seri] = {"runs": [], "ref": is_ref, "flow": flow_v}
+        if is_ref:
+            series_dict[seri]["ref"] = True
+
+        # Max 3 run
+        if len(series_dict[seri]["runs"]) < 3:
+            series_dict[seri]["runs"].append({"run_no": run_no, "masses": masses})
+        else:
+            warnings.append(f"csv_4runs__{seri}")
+
+    if len(flow_vals) > 1:
+        warnings.append("csv_err_flow")
+
+    flow = list(flow_vals)[0] if flow_vals else 60
+    return series_dict, flow, warnings
+
 
 def fmt_num(v, decimals=4, dec_sep=","):
     """Sayiyi formatlayip ondalik ayracini uygula"""
