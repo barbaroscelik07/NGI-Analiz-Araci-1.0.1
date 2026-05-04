@@ -85,14 +85,12 @@ L = {
  "rsd_limit":"RSD Accept (%)","cv_label":"CV%",
 }}
 
-def calc_run(masses, flow, lo=15, hi=85):
+def calc_run(masses, flow, lo=15, hi=85, delivered_tp=False):
+    """delivered_tp=True: Delivered = Throat+Presep+ISM, False: ISM only"""
     co   = NGI_CUTOFFS[flow]
     excl = flow in EXCLUSIVE_FLOWS
     ism  = sum(masses.get(s,0) for s in ISM_STAGES)
-    if flow == 15:
-        metered = masses.get("Throat", 0)
-    else:
-        metered = masses.get("Throat",0) + masses.get("Presep",0) + ism
+    metered = masses.get("Throat",0) + masses.get("Presep",0) + ism
     if ism <= 0:
         return {"error":"no_data","metered":metered,"delivered":ism,"masses":masses}
     cum = []
@@ -108,7 +106,8 @@ def calc_run(masses, flow, lo=15, hi=85):
         cum.append({"stage":s,"d50":co.get(s,999),"mass":masses.get(s,0),"u_pct":u})
     valid = [r for r in cum if r["stage"] in ISM_STAGES
              and co.get(r["stage"],999) < 900 and lo < r["u_pct"] < hi]
-    res = {"metered":metered,"delivered":ism,"cum_data":cum,
+    delivered = (masses.get("Throat",0)+masses.get("Presep",0)+ism) if delivered_tp else ism
+    res = {"metered":metered,"delivered":delivered,"cum_data":cum,
            "valid":valid,"masses":masses,"flow":flow}
     if len(valid) < 2:
         res["error"] = "insufficient"; res["n"] = len(valid); return res
@@ -176,20 +175,30 @@ def calc_f2(ref_m, test_m, co):
     return 50*math.log10(100/math.sqrt(1+np.mean(diffs)))
 
 def parse_paste(text):
+    import re
     lines=[l.strip() for l in text.strip().splitlines() if l.strip()]
     if not lines: return None
+    def split_line(line):
+        # Sekme VEYA çoklu boşluk ayırıcı
+        if '\t' in line:
+            return [t.strip() for t in line.split('\t')]
+        else:
+            return [t.strip() for t in re.split(r'\s{2,}|\s+', line.strip())]
     def is_header(line):
-        first=line.split('\t')[0].strip()
-        try: float(first.replace(',','.')); return False
+        parts = split_line(line)
+        first = parts[0] if parts else ''
+        try: float(first.replace(',','.').replace(' ','')); return False
         except: return True
     if is_header(lines[0]): lines=lines[1:]
     if not lines: return None
     result=[]
     for line in lines:
-        tokens=[t.strip() for t in line.split('\t')]
+        tokens=split_line(line)
         try:
-            vals=[float(t.replace(',','.')) for t in tokens if t]
+            vals=[float(t.replace(',','.').replace(' ','')) for t in tokens if t]
             if len(vals)>=11: result.append(vals[:11])
+            elif len(vals)>=10:  # Device eksik olabilir
+                result.append([0.0]+vals[:10])
         except: pass
     return result if result else None
 
@@ -202,9 +211,11 @@ class NGIApp(ctk.CTk):
         self.all_series=[]; self.series_widgets=[]
         self.flow=60; self.lo=15; self.hi=85
         self.ref_var=tk.BooleanVar(value=False)
+        self.var_lp_avg_only=tk.BooleanVar(value=False)
         self.limit_var=tk.StringVar(value="ema")
         self.custom_pct_var=tk.StringVar(value="20")
         self.rsd_limit_var=tk.StringVar(value="5")
+        self.var_delivered_tp=tk.BooleanVar(value=False)
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
         self.title(self.T["title"])
@@ -294,7 +305,9 @@ class NGIApp(ctk.CTk):
             text_color="#aac8e8").pack(side="left",padx=(8,4),pady=4)
         ctk.CTkEntry(rf2,textvariable=self.rsd_limit_var,width=48,height=24,
             justify="center",font=ctk.CTkFont(size=11)).pack(side="left",padx=4)
-        ctk.CTkLabel(rf2,text="%",font=ctk.CTkFont(size=11)).pack(side="left")
+        ctk.CTkLabel(rf2,text="%  ",font=ctk.CTkFont(size=11)).pack(side="left")
+        ctk.CTkCheckBox(rf2,text="Delivered = T+P+ISM",variable=self.var_delivered_tp,
+            font=ctk.CTkFont(size=10),text_color="#aac8e8").pack(side="left",padx=(8,4))
         self.series_box=ctk.CTkFrame(p,fg_color="transparent")
         self.series_box.pack(fill="x",padx=4,pady=4)
         self._add_series()
@@ -404,7 +417,8 @@ class NGIApp(ctk.CTk):
                 for s in DISP_STAGES:
                     try: m[s]=float(sw["runs"][ri][s].get().replace(",","."))
                     except: m[s]=0.0
-                r=calc_run(m,flow,self.lo,self.hi); r["run_no"]=ri+1
+                r=calc_run(m,flow,self.lo,self.hi,
+                    delivered_tp=self.var_delivered_tp.get()); r["run_no"]=ri+1
                 runs.append(r)
             avg=calc_series_avg(runs)
             self.all_series.append({
@@ -475,17 +489,40 @@ class NGIApp(ctk.CTk):
 
     def _plot_lp(self):
         for w in self.pf.winfo_children(): w.destroy()
-        fig=Figure(figsize=(9,5.5),facecolor="#090c12")
+        # Kontrol paneli
+        lp_ctrl=ctk.CTkFrame(self.pf,fg_color="#1c2336",corner_radius=6,height=34)
+        lp_ctrl.pack(fill="x",padx=4,pady=(4,0)); lp_ctrl.pack_propagate(False)
+        ctk.CTkCheckBox(lp_ctrl,text="Sadece Seri Ortalamalari / Series Averages Only",
+            variable=self.var_lp_avg_only,font=ctk.CTkFont(size=10),
+            text_color="#aac8e8",command=self._plot_lp).pack(side="left",padx=12,pady=6)
+        fig=Figure(figsize=(9,5.2),facecolor="#090c12")
         ax=fig.add_subplot(111); ax.set_facecolor("#0e1525")
         flow=int(self.var_flow.get())
+        avg_only=self.var_lp_avg_only.get()
         for sd in self.all_series:
-            for run in sd["runs"]:
-                if "error" in run: continue
-                lw=2.5 if sd["is_ref"] else 1.5
-                ax.plot(run["x_reg"],run["y_reg"],"o-",color=sd["color"],
-                    alpha=0.85,lw=lw,ms=5,label=f"{sd['name']} R{run['run_no']}")
-                xr=np.linspace(min(run["x_reg"])-0.1,max(run["x_reg"])+0.1,50)
-                ax.plot(xr,run["a"]+run["b"]*xr,"--",color=sd["color"],alpha=0.4,lw=1)
+            if avg_only:
+                # Sadece seri ortalaması
+                if not sd["avg"]: continue
+                valid_runs=[r for r in sd["runs"] if "error" not in r]
+                if not valid_runs: continue
+                # Ortalama x,y hesapla
+                avg_x=np.mean([r["x_reg"] for r in valid_runs],axis=0)
+                avg_y=np.mean([r["y_reg"] for r in valid_runs],axis=0)
+                lw=3 if sd["is_ref"] else 2
+                ax.plot(avg_x,avg_y,"o-",color=sd["color"],alpha=0.9,lw=lw,ms=7,
+                    label=sd["name"])
+                b=np.sum((avg_x-avg_x.mean())*(avg_y-avg_y.mean()))/np.sum((avg_x-avg_x.mean())**2)
+                a=avg_y.mean()-b*avg_x.mean()
+                xr=np.linspace(min(avg_x)-0.1,max(avg_x)+0.1,50)
+                ax.plot(xr,a+b*xr,"--",color=sd["color"],alpha=0.5,lw=1.5)
+            else:
+                for run in sd["runs"]:
+                    if "error" in run: continue
+                    lw=2.5 if sd["is_ref"] else 1.5
+                    ax.plot(run["x_reg"],run["y_reg"],"o-",color=sd["color"],
+                        alpha=0.85,lw=lw,ms=5,label=f"{sd['name']} R{run['run_no']}")
+                    xr=np.linspace(min(run["x_reg"])-0.1,max(run["x_reg"])+0.1,50)
+                    ax.plot(xr,run["a"]+run["b"]*xr,"--",color=sd["color"],alpha=0.4,lw=1)
         notes=[]
         for sd in self.all_series:
             if sd["avg"] and "slope" in sd["avg"]["params"]:
@@ -509,7 +546,8 @@ class NGIApp(ctk.CTk):
     def _plot_dist(self):
         for w in self.df.winfo_children(): w.destroy()
         flow=int(self.var_flow.get()); co=NGI_CUTOFFS[flow]
-        vis=[s for s in GRAPH_STAGES if co.get(s,999)<900]
+        # S1 D50=999 olsa bile göster (kütle grafikte görünmeli)
+        vis=["S1"]+[s for s in GRAPH_STAGES if s!="S1" and co.get(s,999)<900]
         x=np.arange(len(vis))
         # Limit paneli
         lp=ctk.CTkFrame(self.df,fg_color="#1c2336",corner_radius=6,height=38)
@@ -581,14 +619,19 @@ class NGIApp(ctk.CTk):
         cv=FigureCanvasTkAgg(fig,master=self.df); cv.draw()
         cv.get_tk_widget().pack(fill="both",expand=True)
         if warnings:
-            wf=ctk.CTkFrame(self.df,fg_color="#2a0a0a",corner_radius=6)
-            wf.pack(fill="x",padx=4,pady=(2,4))
-            ctk.CTkLabel(wf,text=self.T["outside_warn"],
-                font=ctk.CTkFont(size=12,weight="bold"),text_color="#FF6060").pack(anchor="w",padx=10,pady=(4,0))
+            # f2 satırları yeşil, limit dışı satırlar kırmızı
             for wt in warnings:
-                ctk.CTkLabel(wf,text=f"  - {wt}",font=ctk.CTkFont(size=11),
-                    text_color="#FFB0B0",anchor="w").pack(anchor="w",padx=10,pady=1)
-            ctk.CTkFrame(wf,height=4,fg_color="transparent").pack()
+                is_f2 = self.T["f2_label"] in wt
+                is_pass = ">=" in wt or "Benzer" in wt or "Similar" in wt
+                if is_f2:
+                    bg = "#0a2a0a" if is_pass else "#2a1a00"
+                    tc = "#90ee90" if is_pass else "#FFD080"
+                else:
+                    bg = "#2a0a0a"; tc = "#FFB0B0"
+                wf=ctk.CTkFrame(self.df,fg_color=bg,corner_radius=4)
+                wf.pack(fill="x",padx=4,pady=1)
+                ctk.CTkLabel(wf,text=f"  {wt}",font=ctk.CTkFont(size=11,weight="bold" if is_f2 else "normal"),
+                    text_color=tc,anchor="w").pack(anchor="w",padx=10,pady=3)
 
     def _show_summary(self):
         for w in self.sf.winfo_children(): w.destroy()
@@ -779,12 +822,17 @@ def make_pdf_multi(path,all_series,meta,flow,T,limit_pct=20):
     from reportlab.pdfbase.ttfonts import TTFont
     import os
     fn="Helvetica"; fb="Helvetica-Bold"
-    for nm,ff in [("DejaVu","DejaVuSans.ttf"),("DejaVuB","DejaVuSans-Bold.ttf")]:
-        fp=resource_path(ff)
+    for nm,ffile,nbold in [("DejaVu","DejaVuSans.ttf","DejaVuB"),
+                            ("DejaVuB","DejaVuSans-Bold.ttf","DejaVuB")]:
+        fp=resource_path(ffile)
         if os.path.exists(fp):
-            try: pdfmetrics.registerFont(TTFont(nm,fp)); fn=nm; fb="DejaVuB"
+            try: pdfmetrics.registerFont(TTFont(nm,fp))
             except: pass
-            break
+    # Kontrol et
+    try:
+        from reportlab.pdfbase.pdfmetrics import getFont
+        getFont("DejaVuB"); fb="DejaVuB"; fn="DejaVu"
+    except: fn="Helvetica"; fb="Helvetica-Bold"
     CN=colors.HexColor("#002D62"); CB=colors.HexColor("#1F4E79")
     CG=colors.HexColor("#F2F2F2"); CD=colors.HexColor("#404040")
     CW=colors.white; CGREEN=colors.HexColor("#E2EFDA"); CRED=colors.HexColor("#FFCCCC")
