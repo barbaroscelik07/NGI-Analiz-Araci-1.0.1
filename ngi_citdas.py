@@ -407,7 +407,8 @@ class NGIApp(ctk.CTk):
         self.cbox=ctk.CTkFrame(p,fg_color="#111827",corner_radius=6)
         self.cbox.pack(fill="x",padx=6,pady=(2,4))
         self._refresh_cutoffs()
-        bf=ctk.CTkFrame(p,fg_color="transparent"); bf.pack(fill="x",padx=6,pady=4)
+        # Birinci buton satiri: Seri + Hesap
+        bf=ctk.CTkFrame(p,fg_color="transparent"); bf.pack(fill="x",padx=6,pady=(4,2))
         self.btn_add_s=ctk.CTkButton(bf,text=self.T["add_series"],width=110,height=30,
             command=self._add_series,fg_color="#1a3a6a",hover_color="#2255a0",
             font=ctk.CTkFont(size=11,weight="bold")); self.btn_add_s.pack(side="left",padx=(0,4))
@@ -419,14 +420,15 @@ class NGIApp(ctk.CTk):
             font=ctk.CTkFont(size=11,weight="bold")); self.btn_calc.pack(side="left",padx=(0,4))
         self.btn_clr=ctk.CTkButton(bf,text=self.T["clear"],width=70,height=30,
             command=self._clear,fg_color="#3a3a1a",hover_color="#6a6a20",
-            font=ctk.CTkFont(size=11)); self.btn_clr.pack(side="left",padx=(0,4))
-        self.btn_pdf=ctk.CTkButton(bf,text=self.T["export_pdf"],width=90,height=30,
+            font=ctk.CTkFont(size=11)); self.btn_clr.pack(side="left")
+        # Ikinci buton satiri: PDF + CSV
+        bf2=ctk.CTkFrame(p,fg_color="transparent"); bf2.pack(fill="x",padx=6,pady=(0,4))
+        self.btn_pdf=ctk.CTkButton(bf2,text=self.T["export_pdf"],width=130,height=30,
             command=self._export_pdf,fg_color="#3a1a5a",hover_color="#6a20a0",
-            font=ctk.CTkFont(size=11)); self.btn_pdf.pack(side="left",padx=(0,4))
-        self.btn_csv=ctk.CTkButton(bf,text=self.T["load_csv"],width=90,height=30,
+            font=ctk.CTkFont(size=11,weight="bold")); self.btn_pdf.pack(side="left",padx=(0,4))
+        self.btn_csv=ctk.CTkButton(bf2,text=self.T["load_csv"],width=130,height=30,
             command=self._load_csv,fg_color="#0a4a3a",hover_color="#0a7a5a",
-            font=ctk.CTkFont(size=11,weight="bold"))
-        self.btn_csv.pack(side="left")
+            font=ctk.CTkFont(size=11,weight="bold")); self.btn_csv.pack(side="left")
         rf2=ctk.CTkFrame(p,fg_color="#1c2336",corner_radius=6)
         rf2.pack(fill="x",padx=6,pady=(0,4))
         ctk.CTkLabel(rf2,text=self.T["rsd_limit"],font=ctk.CTkFont(size=11),
