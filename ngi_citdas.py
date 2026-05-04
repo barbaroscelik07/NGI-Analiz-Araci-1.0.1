@@ -221,7 +221,6 @@ def parse_paste(text):
     return result if result else None
 
 DISP_STAGES=["Throat","Presep","S1","S2","S3","S4","S5","S6","S7","MOC"]
-REQUIRED_COLS = ["seri","run","flow","throat","s1","s2","s3","s4","s5","s6","s7","moc"]
 
 def parse_csv(path):
     """CSV dosyasini oku, seri/run gruplarini dondur.
@@ -423,7 +422,11 @@ class NGIApp(ctk.CTk):
             font=ctk.CTkFont(size=11)); self.btn_clr.pack(side="left",padx=(0,4))
         self.btn_pdf=ctk.CTkButton(bf,text=self.T["export_pdf"],width=90,height=30,
             command=self._export_pdf,fg_color="#3a1a5a",hover_color="#6a20a0",
-            font=ctk.CTkFont(size=11)); self.btn_pdf.pack(side="left")
+            font=ctk.CTkFont(size=11)); self.btn_pdf.pack(side="left",padx=(0,4))
+        self.btn_csv=ctk.CTkButton(bf,text=self.T["load_csv"],width=90,height=30,
+            command=self._load_csv,fg_color="#0a4a3a",hover_color="#0a7a5a",
+            font=ctk.CTkFont(size=11,weight="bold"))
+        self.btn_csv.pack(side="left")
         rf2=ctk.CTkFrame(p,fg_color="#1c2336",corner_radius=6)
         rf2.pack(fill="x",padx=6,pady=(0,4))
         ctk.CTkLabel(rf2,text=self.T["rsd_limit"],font=ctk.CTkFont(size=11),
@@ -964,6 +967,7 @@ class NGIApp(ctk.CTk):
         self.btn_calc.configure(text=self.T["calculate"])
         self.btn_clr.configure(text=self.T["clear"])
         self.btn_pdf.configure(text=self.T["export_pdf"])
+        self.btn_csv.configure(text=self.T["load_csv"])
         self._refresh_cutoffs()
         for sw in self.series_widgets:
             sw["paste_btn"].configure(text=self.T["paste_btn"])
@@ -976,6 +980,84 @@ class NGIApp(ctk.CTk):
         # Aktif sekmeyi yeniden ayarla
         try: self.tabs.set(self.T["tab_results"])
         except: pass
+
+    def _load_csv(self):
+        from tkinter import filedialog, messagebox
+        path=filedialog.askopenfilename(
+            title="CSV Dosyasi Sec / Select CSV File",
+            filetypes=[("CSV","*.csv"),("Tum dosyalar / All files","*.*")])
+        if not path: return
+        try:
+            series_dict,flow,warnings=parse_csv(path)
+        except Exception as ex:
+            messagebox.showerror("CSV Hatasi / Error",str(ex)); return
+        if series_dict is None:
+            messagebox.showerror("CSV Hatasi",warnings[0] if warnings else "Okunamadi"); return
+        # Uyarilar
+        if "csv_err_flow" in warnings:
+            messagebox.showwarning("",self.T["csv_err_flow"])
+        for w in warnings:
+            if w.startswith("csv_4runs__"):
+                messagebox.showwarning("",self.T["csv_4runs"].format(s=w.replace("csv_4runs__","")))
+        # Referans kolonu yoksa popup sor
+        has_ref=any(v["ref"] for v in series_dict.values())
+        if not has_ref:
+            import tkinter as _tk
+            names=list(series_dict.keys())
+            popup=_tk.Toplevel(self); popup.title(self.T["csv_ref_ask"])
+            popup.geometry("440x340"); popup.grab_set()
+            popup.configure(bg="#141824")
+            ctk.CTkLabel(popup,text=self.T["csv_ref_ask"],
+                font=ctk.CTkFont(size=12,weight="bold"),
+                text_color="#FFC600").pack(pady=(16,6))
+            ref_var=_tk.StringVar(value=self.T["csv_ref_none"])
+            sc=ctk.CTkScrollableFrame(popup,fg_color="#1c2336",height=200)
+            sc.pack(fill="x",padx=16,pady=4)
+            for ch in names+[self.T["csv_ref_none"]]:
+                ctk.CTkRadioButton(sc,text=ch,variable=ref_var,value=ch,
+                    font=ctk.CTkFont(size=11)).pack(anchor="w",pady=3,padx=8)
+            def _ok():
+                sel=ref_var.get()
+                if sel!=self.T["csv_ref_none"]:
+                    for k in series_dict: series_dict[k]["ref"]=(k==sel)
+                popup.destroy()
+            ctk.CTkButton(popup,text="Tamam / OK",command=_ok,
+                fg_color="#1a5a1a",hover_color="#2a8a2a",
+                font=ctk.CTkFont(size=11,weight="bold")).pack(pady=10)
+            self.wait_window(popup)
+        # Flow ayarla
+        if flow in NGI_CUTOFFS:
+            self.var_flow.set(str(flow)); self._on_flow(str(flow))
+        # Mevcut serileri temizle
+        for sw in self.series_widgets: sw["frame"].destroy()
+        self.series_widgets.clear(); self.all_series=[]
+        for tf in [self.rf,self.pf,self.df,self.sf,self.cf]:
+            for w in tf.winfo_children(): w.destroy()
+        # Serileri yukle
+        ref_set=False
+        for si,(seri_ad,seri_data) in enumerate(series_dict.items()):
+            self._add_series()
+            sw=self.series_widgets[-1]
+            sw["name"].set(seri_ad)
+            # Referans sadece 1. seri icin gecerli
+            if si==0:
+                self.ref_var.set(seri_data["ref"])
+                if seri_data["ref"]: ref_set=True
+            # Run degerlerini gir
+            for ri,run_data in enumerate(seri_data["runs"][:RUNS_PER_SERIES]):
+                for s in DISP_STAGES:
+                    val=run_data["masses"].get(s,0.0)
+                    sw["runs"][ri][s].set(fmt_num(val,4,"."))
+        # 1. seri disinda referans varsa uyar
+        ref_list=[k for k,v in series_dict.items() if v["ref"]]
+        if ref_list and ref_list[0]!=list(series_dict.keys())[0]:
+            messagebox.showinfo("",
+                "Referans seri: "+ref_list[0]+
+                "\nNot: Referans secenegi yalnizca 1. seride etkin.\n"
+                "Referans seriyi 1. siraya tasiyin.")
+        n_s=len(series_dict)
+        n_r=sum(len(v["runs"]) for v in series_dict.values())
+        self.lbl_status.configure(text=self.T["csv_loaded"].format(n=n_s,r=n_r))
 
     def _clear(self):
         for sw in self.series_widgets:
