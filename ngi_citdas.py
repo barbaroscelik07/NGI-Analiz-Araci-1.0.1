@@ -453,6 +453,19 @@ class NGIApp(ctk.CTk):
         self.series_box.pack(fill="x",padx=4,pady=4)
         self._add_series()
 
+    def _on_tab_change(self):
+        """Sekme degisince sadece o sekmeyi render et"""
+        if not self.all_series: return
+        current = self.tabs.get()
+        if current == self._last_rendered_tab: return
+        self._last_rendered_tab = current
+        T = self.T
+        if current == T["tab_plot"]:    self._plot_lp()
+        elif current == T["tab_dist"]:  self._plot_dist()
+        elif current == T["tab_summary"]: self._show_summary()
+        elif current == T["tab_compare"]: self._show_compare()
+        # tab_results her zaman ilk render edilir (_calculate'de)
+
     def _refresh_cutoffs(self):
         for w in self.cbox.winfo_children(): w.destroy()
         flow=int(self.var_flow.get()); co=NGI_CUTOFFS[flow]
@@ -536,7 +549,8 @@ class NGIApp(ctk.CTk):
         self.tabs=ctk.CTkTabview(parent,fg_color="#0e1219",
             segmented_button_fg_color="#1c2336",
             segmented_button_selected_color="#2E75B6",
-            segmented_button_unselected_color="#1c2336")
+            segmented_button_unselected_color="#1c2336",
+            command=self._on_tab_change)
         self.tabs.pack(fill="both",expand=True,padx=4,pady=4)
         for k in ["tab_results","tab_plot","tab_dist","tab_summary","tab_compare"]:
             self.tabs.add(self.T[k])
@@ -545,6 +559,7 @@ class NGIApp(ctk.CTk):
         self.df=self.tabs.tab(self.T["tab_dist"])
         self.sf=self.tabs.tab(self.T["tab_summary"])
         self.cf=self.tabs.tab(self.T["tab_compare"])
+        self._last_rendered_tab = None
 
     def _calculate(self):
         try: self.lo=float(self.e_lo.get()); self.hi=float(self.e_hi.get())
@@ -567,8 +582,17 @@ class NGIApp(ctk.CTk):
                 "runs":runs,"avg":avg,
                 "is_ref":self.ref_var.get() and (sw==self.series_widgets[0])
             })
-        self._show_results(); self._plot_lp()
-        self._plot_dist(); self._show_summary(); self._show_compare()
+        self.lbl_status.configure(text="Hesaplaniyor...")
+        self.update_idletasks()
+        self._show_results()           # Sonuclar sekmesi hemen render
+        self._last_rendered_tab = self.T["tab_results"]
+        # Diger sekmeler sekme degisince lazy render edilecek
+        # Aktif sekme hangisiyse onu da hemen render et
+        cur = self.tabs.get()
+        if cur == self.T["tab_plot"]:    self._plot_lp()
+        elif cur == self.T["tab_dist"]:  self._plot_dist()
+        elif cur == self.T["tab_summary"]: self._show_summary()
+        elif cur == self.T["tab_compare"]: self._show_compare()
         self.lbl_status.configure(text=self.T["status_done"])
 
     def _show_results(self):
@@ -577,6 +601,8 @@ class NGIApp(ctk.CTk):
         scroll.pack(fill="both",expand=True)
         BF=ctk.CTkFont(size=12,weight="bold"); NF=ctk.CTkFont(size=12)
         HF=ctk.CTkFont(size=13,weight="bold")
+        # 5+ seri varsa kumulatif tablo gizli baslar (performans)
+        compact_mode = len(self.all_series) >= 5
         for sd in self.all_series:
             rt="  ["+self.T["ref_label"]+"]" if sd["is_ref"] else ""
             ctk.CTkLabel(scroll,text=f"  {sd['name']}{rt}",font=HF,
@@ -587,8 +613,10 @@ class NGIApp(ctk.CTk):
                 if "error" in run:
                     ctk.CTkLabel(scroll,text=f"      {self.T['insufficient']} (n={run.get('n',0)})",
                         font=NF,text_color="#ff6060").pack(anchor="w",padx=20); continue
+                # Compact modda kumulatif tablo gizli baslar
                 tf=ctk.CTkFrame(scroll,fg_color="#111827",corner_radius=6)
-                tf.pack(fill="x",padx=16,pady=2)
+                if not compact_mode:
+                    tf.pack(fill="x",padx=16,pady=2)
                 T=self.T; ds=T["dec_sep"]
                 hdrs=[T["stage"],"D50",T["mass_mg"],T["cum_mass"],T["cum_pct"],T["valid_pt"],T["probit_z"]]
                 ws=[58,66,76,80,68,30,80]
@@ -647,10 +675,13 @@ class NGIApp(ctk.CTk):
         ctk.CTkCheckBox(lp_ctrl,text="Sadece Seri Ortalamalari / Series Averages Only",
             variable=self.var_lp_avg_only,font=ctk.CTkFont(size=10),
             text_color="#aac8e8",command=self._plot_lp).pack(side="left",padx=12,pady=6)
+        import matplotlib.pyplot as _plt_lp
+        _plt_lp.close("all")  # Eski figure'lari temizle
         fig=Figure(figsize=(9,5.2),facecolor="#090c12")
         ax=fig.add_subplot(111); ax.set_facecolor("#0e1525")
         flow=int(self.var_flow.get())
-        avg_only=self.var_lp_avg_only.get()
+        # 4+ seri varsa otomatik ortalama moda gec (performans)
+        avg_only = self.var_lp_avg_only.get() or (len(self.all_series) >= 4)
         for sd in self.all_series:
             if avg_only:
                 # Sadece seri ortalaması
@@ -701,8 +732,13 @@ class NGIApp(ctk.CTk):
         ax.set_title(f"Log-Probit  [{flow} L/min]",color="#FFC600",fontsize=12,fontweight="bold")
         ax.tick_params(colors="#7090b0"); ax.spines[:].set_color("#2a4060")
         ax.grid(True,color="#1a3050",ls="--",alpha=0.5)
-        if ax.get_legend_handles_labels()[0]:
-            ax.legend(fontsize=9,facecolor="#0e1525",labelcolor="#d0e0f0")
+        hdls, lbls = ax.get_legend_handles_labels()
+        if hdls:
+            n_leg = len(hdls)
+            leg_fs = max(6, 9 - max(0, n_leg-6))  # cok seri varsa kucuk font
+            ax.legend(fontsize=leg_fs, facecolor="#0e1525", labelcolor="#d0e0f0",
+                      loc="best", ncol=2 if n_leg>6 else 1,
+                      framealpha=0.85)
         fig.tight_layout()
         cv=FigureCanvasTkAgg(fig,master=self.pf); cv.draw()
         cv.get_tk_widget().pack(fill="both",expand=True)
@@ -729,6 +765,8 @@ class NGIApp(ctk.CTk):
         lim_map={"ema":20,"fda":15,"usp":25}
         try: pct=lim_map.get(self.limit_var.get()) or float(self.custom_pct_var.get())
         except: pct=20
+        import matplotlib.pyplot as _plt_dist
+        _plt_dist.close("all")
         fig=Figure(figsize=(9,5.0),facecolor="#090c12")
         ax=fig.add_subplot(111); ax.set_facecolor("#0e1525")
         # Throat dahil stage listesi
@@ -796,9 +834,13 @@ class NGIApp(ctk.CTk):
         ax.set_title(ttl,color="#FFC600",fontsize=11,fontweight="bold")
         ax.tick_params(colors="#7090b0"); ax.spines[:].set_color("#2a4060")
         ax.grid(True,color="#1a3050",ls="--",alpha=0.5)
-        if ax.get_legend_handles_labels()[0]:
-            ax.legend(fontsize=9,facecolor="#0e1525",labelcolor="#d0e0f0",
-                framealpha=0.8,loc="upper right")
+        hdls2, lbls2 = ax.get_legend_handles_labels()
+        if hdls2:
+            n_leg2 = len(hdls2)
+            leg_fs2 = max(6, 9 - max(0, n_leg2-6))
+            ax.legend(fontsize=leg_fs2, facecolor="#0e1525", labelcolor="#d0e0f0",
+                framealpha=0.85, loc="upper right",
+                ncol=2 if n_leg2>6 else 1)
         fig.tight_layout()
         cv=FigureCanvasTkAgg(fig,master=self.df); cv.draw()
         cv.get_tk_widget().pack(fill="both",expand=True)
@@ -893,6 +935,7 @@ class NGIApp(ctk.CTk):
         HF=ctk.CTkFont(size=13,weight="bold")
         flow=int(self.var_flow.get()); co=NGI_CUTOFFS[flow]
         if len(self.all_series)>=2:
+            import matplotlib.pyplot as _plt_cmp; _plt_cmp.close("all")
             fig2=Figure(figsize=(9,3.2),facecolor="#090c12")
             ax1=fig2.add_subplot(121); ax2=fig2.add_subplot(122)
             ax1.set_facecolor("#0e1525"); ax2.set_facecolor("#0e1525")
