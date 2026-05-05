@@ -1225,8 +1225,10 @@ def make_pdf_multi(path, all_series, meta, flow, T, limit_pct=20, rsd_lim=5.0, l
 
     def fmt(v, decimals=4):
         """Sayi formatlama: nokta yerine virgul"""
+        if v is None: return "-"
         if isinstance(v, int): return str(v)
-        return f"{v:.{decimals}f}".replace('.', ',')
+        try: return f"{v:.{decimals}f}".replace(".", ",")
+        except: return str(v)
 
     doc = SimpleDocTemplate(path, pagesize=A4,
         leftMargin=1.5*cm, rightMargin=1.5*cm,
@@ -1500,9 +1502,11 @@ def make_pdf_multi(path, all_series, meta, flow, T, limit_pct=20, rsd_lim=5.0, l
         for sd in test_series:
             f2 = calc_f2(ref_m, sd["avg"]["avg_masses"], co)
             f2_pass = f2 is not None and f2 >= 50
-            f2_txt = f"f2 = {fmt(f2,1)}  " + \
-                     ("Similar (>=50)" if f2_pass else "Different (<50)") \
-                     if f2 else "f2 = N/A"
+            if f2 is not None:
+                f2_txt = "f2 = " + fmt(f2,1) + "  " + \
+                         ("Similar (>=50)" if f2_pass else "Different (<50)")
+            else:
+                f2_txt = "f2 = N/A"
             story.append(Paragraph(f"{sd['name']}   |   {f2_txt}",
                 ps(8, True, colors.black)))
             story.append(Spacer(1,1*mm))
