@@ -1557,7 +1557,7 @@ def make_pdf_multi(path, all_series, meta, flow, T, limit_pct=20, rsd_lim=5.0, l
     from reportlab.platypus import Image as RLImage
 
     BW_COLORS = ["black","#333","#555","#777","#999","#BBB"]
-    BW_LS     = ["-","--","-.",":",(0,(5,1)),(0,(3,1,1,1))]
+    BW_LS     = ["-","--","-.",":","--","-."]
 
     # Log-Probit
     fig_lp, ax_lp = _plt.subplots(figsize=(7,3.8))
@@ -1636,7 +1636,7 @@ def make_pdf_multi(path, all_series, meta, flow, T, limit_pct=20, rsd_lim=5.0, l
         for s in vis_ap:
             vals=[r["masses"].get(s,0) for r in valid_runs]
             sds_ap.append(float(np.std(vals,ddof=1)) if len(vals)>1 else 0.0)
-        ax_ap.plot(x_ap, ms_ap, "o"+ls, color=col, lw=lw, ms=5,
+        ax_ap.plot(x_ap, ms_ap, color=col, lw=lw, ms=5, marker="o", linestyle=ls if isinstance(ls,str) else "-",
             label=sd["name"]+(" [REF]" if sd["is_ref"] else ""))
         ax_ap.fill_between(x_ap, [m-s for m,s in zip(ms_ap,sds_ap)],
             [m+s for m,s in zip(ms_ap,sds_ap)], color=col, alpha=0.08)
