@@ -1148,7 +1148,10 @@ class NGIApp(ctk.CTk):
             except: pass
             messagebox.showinfo("",f"PDF kaydedildi:\n{path}")
         except Exception as ex:
-            messagebox.showerror("PDF Hatasi",str(ex))
+            import traceback as _tb
+            full = _tb.format_exc()
+            messagebox.showerror("PDF Hatasi",
+                str(ex) + "\n\n--- Detay ---\n" + full[-500:])
 
 def make_pdf_multi(path, all_series, meta, flow, T, limit_pct=20, rsd_lim=5.0, lang="TR"):
     from reportlab.lib.pagesizes import A4
