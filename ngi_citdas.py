@@ -296,7 +296,7 @@ QWidget {{
     background: {BG};
     color: {TXT};
     font-family: 'Segoe UI', 'Arial';
-    font-size: 11px;
+    font-size: 13px;
 }}
 QLabel {{
     color: {TXT};
@@ -411,9 +411,10 @@ QTabBar::tab {{
     color: {TXT2};
     border: 1px solid #2a4060;
     border-bottom: none;
-    padding: 6px 14px;
+    padding: 8px 16px;
     margin-right: 2px;
     border-radius: 4px 4px 0 0;
+    font-size: 13px;
 }}
 QTabBar::tab:selected {{
     background: #2E75B6;
@@ -517,6 +518,138 @@ class CalcThread(QThread):
 # ═══════════════════════════════════════════════════════════════════════════════
 # SERİ PANELİ
 # ═══════════════════════════════════════════════════════════════════════════════
+class DataEntryDialog(QDialog):
+    """Stage veri giriş popup"""
+    def __init__(self, series_panel, T, color, parent=None):
+        super().__init__(parent)
+        self.sp = series_panel; self.T = T; self.color = color
+        self.setWindowTitle(f"Veri Girisi - {series_panel.name_edit.text()}")
+        self.setMinimumSize(620, 520)
+        self.setStyleSheet(STYLE)
+        self._build()
+        self._load_existing()
+
+    def _build(self):
+        vl = QVBoxLayout(self)
+        vl.setSpacing(6); vl.setContentsMargins(10,10,10,10)
+
+        # Başlık
+        hdr = QLabel(f"  {self.sp.name_edit.text()} — Stage Kütleleri (mg)")
+        hdr.setStyleSheet(f"color:{self.color};font-weight:bold;font-size:14px;"
+            f"background:{BG3};border-left:4px solid {self.color};padding:6px;border-radius:4px;")
+        vl.addWidget(hdr)
+
+        # Yapıştır butonu
+        paste_row = QHBoxLayout()
+        lbl_p = QLabel("Excel/Word'den tüm sütunları kopyalayıp buraya yapıştırabilirsiniz:")
+        lbl_p.setStyleSheet("color:#7090b0;font-size:11px;")
+        paste_row.addWidget(lbl_p)
+        paste_row.addStretch()
+        paste_all_btn = QPushButton("📋 Tümünü Yapıştır")
+        paste_all_btn.setFixedSize(140,28)
+        paste_all_btn.setStyleSheet("font-size:11px;")
+        paste_all_btn.clicked.connect(self._paste_all)
+        paste_row.addWidget(paste_all_btn)
+        vl.addLayout(paste_row)
+
+        # Grid
+        scroll = QScrollArea(); scroll.setWidgetResizable(True)
+        grid_widget = QWidget()
+        grid = QGridLayout(grid_widget)
+        grid.setSpacing(3); grid.setContentsMargins(4,4,4,4)
+
+        # Başlık satırı
+        for ci, txt in enumerate(["Stage", "Run 1", "Run 2", "Run 3"]):
+            lbl = QLabel(txt)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setStyleSheet(f"color:{self.color if ci>0 else '#7090b0'};"
+                f"font-weight:bold;font-size:12px;background:{BG3};"
+                f"border-radius:3px;padding:4px;")
+            grid.addWidget(lbl, 0, ci)
+
+        self.entries = [{} for _ in range(RUNS_PER_SER)]
+        for si, s in enumerate(DISP_STAGES):
+            row_i = si + 1
+            lc = "#FFD700" if s=="Presep" else "#aac8e8"
+            lbl = QLabel(s)
+            lbl.setStyleSheet(f"color:{lc};font-size:13px;font-weight:bold;"
+                f"min-width:60px;background:transparent;")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            grid.addWidget(lbl, row_i, 0)
+            for ri in range(RUNS_PER_SER):
+                e = QLineEdit("0.0000")
+                e.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                e.setFixedHeight(30)
+                e.setStyleSheet("font-size:12px;padding:2px 6px;")
+                e.focusInEvent = lambda ev, _e=e: (_e.selectAll()) or QLineEdit.focusInEvent(_e, ev)
+                grid.addWidget(e, row_i, ri+1)
+                self.entries[ri][s] = e
+
+        scroll.setWidget(grid_widget)
+        vl.addWidget(scroll, 1)
+
+        # Butonlar
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok |
+            QDialogButtonBox.StandardButton.Cancel)
+        btns.button(QDialogButtonBox.StandardButton.Ok).setText("Kaydet")
+        btns.button(QDialogButtonBox.StandardButton.Cancel).setText("İptal")
+        btns.accepted.connect(self._save); btns.rejected.connect(self.reject)
+        vl.addWidget(btns)
+
+    def _load_existing(self):
+        """Mevcut değerleri yükle"""
+        for ri in range(RUNS_PER_SER):
+            for s in DISP_STAGES:
+                val = self.sp.entries[ri][s].text()
+                self.entries[ri][s].setText(val)
+
+    def _save(self):
+        """Değerleri series panel'e yaz"""
+        for ri in range(RUNS_PER_SER):
+            for s in DISP_STAGES:
+                self.sp.entries[ri][s].setText(self.entries[ri][s].text())
+        self.accept()
+
+    def _paste_all(self):
+        cb = QApplication.clipboard()
+        text = cb.text()
+        if not text.strip(): return
+        rows = self._parse_paste(text)
+        if not rows:
+            QMessageBox.warning(self, "", "Gecerli veri bulunamadi (11 sutun bekleniyor)"); return
+        all_s = ["Device","Throat","Presep","S1","S2","S3","S4","S5","S6","S7","MOC"]
+        for ri, row_vals in enumerate(rows[:RUNS_PER_SER]):
+            for si, val in enumerate(row_vals[:11]):
+                s = all_s[si]
+                if s in self.entries[ri]:
+                    self.entries[ri][s].setText(f"{val:.4f}")
+
+    def _parse_paste(self, text):
+        import re
+        lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+        if not lines: return None
+        def split_line(line):
+            if "\t" in line: return [t.strip() for t in line.split("\t")]
+            return [t.strip() for t in re.split(r"\s{2,}|\s+", line.strip())]
+        def is_header(line):
+            parts = split_line(line)
+            first = parts[0] if parts else ""
+            try: float(first.replace(",",".").replace(" ","")); return False
+            except: return True
+        if is_header(lines[0]): lines = lines[1:]
+        if not lines: return None
+        result = []
+        for line in lines:
+            tokens = split_line(line)
+            try:
+                vals = [float(t.replace(",",".").replace(" ","")) for t in tokens if t]
+                if len(vals) >= 11: result.append(vals[:11])
+                elif len(vals) >= 10: result.append([0.0]+vals[:10])
+            except: pass
+        return result if result else None
+
+
 class SeriesPanel(QFrame):
     def __init__(self, idx, color, T, parent=None):
         super().__init__(parent)
@@ -533,64 +666,62 @@ class SeriesPanel(QFrame):
         self._build()
 
     def _build(self):
-        layout = QVBoxLayout(self)
-        layout.setSpacing(4); layout.setContentsMargins(8,6,8,6)
+        layout = QHBoxLayout(self)
+        layout.setSpacing(6); layout.setContentsMargins(8,5,8,5)
 
-        # Başlık satırı
-        hdr = QHBoxLayout(); hdr.setSpacing(6)
-        self.lbl_num = QLabel(f"  {self.T['series']} {self.idx}")
-        self.lbl_num.setStyleSheet(f"color:{self.color};font-weight:bold;font-size:12px;background:transparent;border:none;")
-        hdr.addWidget(self.lbl_num)
+        # Renk göstergesi
+        color_bar = QFrame()
+        color_bar.setFixedWidth(4)
+        color_bar.setStyleSheet(f"background:{self.color};border-radius:2px;")
+        layout.addWidget(color_bar)
+
+        # İsim
         self.name_edit = QLineEdit(f"Seri {self.idx}")
-        self.name_edit.setStyleSheet(f"border-left:2px solid {self.color};font-weight:bold;")
-        self.name_edit.setMaximumWidth(160)
-        hdr.addWidget(self.name_edit)
-        hdr.addStretch()
-        self.paste_btn = QPushButton(self.T["paste_btn"])
-        self.paste_btn.setMaximumWidth(90)
-        self.paste_btn.setStyleSheet("font-size:10px;")
-        self.paste_btn.clicked.connect(self._paste)
-        hdr.addWidget(self.paste_btn)
-        layout.addLayout(hdr)
+        self.name_edit.setStyleSheet(f"font-weight:bold;font-size:13px;border-left:none;")
+        self.name_edit.setMinimumWidth(120)
+        layout.addWidget(self.name_edit, 1)
 
         # Referans checkbox (sadece 1. seri)
         if self.idx == 1:
             self.ref_check = QCheckBox(self.T["ref_check"])
-            self.ref_check.setStyleSheet(f"color:{GOLD};font-weight:bold;")
+            self.ref_check.setStyleSheet(f"color:{GOLD};font-weight:bold;font-size:12px;")
             layout.addWidget(self.ref_check)
         else:
             self.ref_check = None
 
-        # Grid: stage × run
-        grid = QGridLayout(); grid.setSpacing(2)
-        # Başlık
-        stage_lbl = QLabel(self.T["stage"])
-        stage_lbl.setStyleSheet(f"color:{TXT2};font-weight:bold;background:transparent;border:none;")
-        grid.addWidget(stage_lbl, 0, 0)
-        for ri in range(RUNS_PER_SER):
-            lbl = QLabel(f"Run {ri+1}")
-            lbl.setStyleSheet(f"color:{self.color};font-weight:bold;text-align:center;background:transparent;border:none;")
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            grid.addWidget(lbl, 0, ri+1)
+        # Düzenle butonu
+        self.edit_btn = QPushButton("✏ Düzenle")
+        self.edit_btn.setFixedSize(90, 28)
+        self.edit_btn.setStyleSheet(f"background:#1a3a6a;border:1px solid #2a5a9a;font-size:12px;border-radius:4px;")
+        self.edit_btn.clicked.connect(self._open_edit)
+        layout.addWidget(self.edit_btn)
 
-        self.entries = [{} for _ in range(RUNS_PER_SER)]
-        for si, s in enumerate(DISP_STAGES):
-            row_i = si + 1
-            lc = "#FFD700" if s == "Presep" else TXT2
-            lbl = QLabel(s)
-            lbl.setStyleSheet(f"color:{lc};background:transparent;border:none;min-width:42px;")
-            grid.addWidget(lbl, row_i, 0)
-            for ri in range(RUNS_PER_SER):
-                e = QLineEdit("0.000")
-                e.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                e.setFixedWidth(78)
-                e.setFixedHeight(24)
-                e.setStyleSheet("font-size:11px;padding:1px 4px;")
-                e.focusInEvent  = lambda ev, _e=e: (_e.selectAll() if _e.text()=="0.000" else None) or QLineEdit.focusInEvent(_e, ev)
-                grid.addWidget(e, row_i, ri+1)
-                self.entries[ri][s] = e
+        # Görünürlük checkbox
+        self.vis_check = QCheckBox()
+        self.vis_check.setChecked(True)
+        self.vis_check.setToolTip("Grafikte göster/gizle")
+        self.vis_check.setStyleSheet(f"""
+            QCheckBox::indicator {{ width:16px; height:16px; border:2px solid {self.color};
+                border-radius:3px; background:transparent; }}
+            QCheckBox::indicator:checked {{ background:{self.color}; }}
+        """)
+        layout.addWidget(self.vis_check)
 
-        layout.addLayout(grid)
+        # Sil butonu
+        self.del_btn = QPushButton("✕")
+        self.del_btn.setFixedSize(28, 28)
+        self.del_btn.setStyleSheet(f"background:#3a1a1a;border:1px solid #6a2020;font-size:12px;border-radius:4px;")
+        layout.addWidget(self.del_btn)
+
+        # Veri depoları (gizli)
+        self.entries = [{s: QLineEdit("0.000") for s in DISP_STAGES}
+                        for _ in range(RUNS_PER_SER)]
+
+    def _open_edit(self):
+        """Stage veri giriş popup'ını aç"""
+        dlg = DataEntryDialog(self, self.T, self.color)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            pass  # Veri zaten self.entries'e yazıldı
 
     def get_masses(self, run_idx):
         m = {"Device": 0.0}
@@ -645,10 +776,9 @@ class SeriesPanel(QFrame):
 
     def update_lang(self, T):
         self.T = T
-        self.lbl_num.setText(f"  {T['series']} {self.idx}")
-        self.paste_btn.setText(T["paste_btn"])
         if self.ref_check:
             self.ref_check.setText(T["ref_check"])
+        self.edit_btn.setText("✏ " + ("Düzenle" if T.get("dec_sep","") == "," else "Edit"))
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ANA UYGULAMA
@@ -823,6 +953,24 @@ class NGIApp(QMainWindow):
         opts.addStretch()
         layout.addLayout(opts)
 
+        # Seri seçim paneli başlık
+        sel_hdr = QHBoxLayout(); sel_hdr.setSpacing(4)
+        sel_title = QLabel("Seriler")
+        sel_title.setStyleSheet(f"color:{GOLD};font-weight:bold;font-size:13px;background:transparent;")
+        sel_hdr.addWidget(sel_title)
+        sel_hdr.addStretch()
+        self.btn_sel_all = QPushButton("Tümünü Seç")
+        self.btn_sel_all.setFixedHeight(24)
+        self.btn_sel_all.setStyleSheet("font-size:11px;padding:2px 8px;")
+        self.btn_sel_all.clicked.connect(self._select_all_series)
+        sel_hdr.addWidget(self.btn_sel_all)
+        self.btn_sel_none = QPushButton("Tümünü Gizle")
+        self.btn_sel_none.setFixedHeight(24)
+        self.btn_sel_none.setStyleSheet("font-size:11px;padding:2px 8px;background:#3a1a1a;")
+        self.btn_sel_none.clicked.connect(self._deselect_all_series)
+        sel_hdr.addWidget(self.btn_sel_none)
+        layout.addLayout(sel_hdr)
+
         # Seri listesi (scroll)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -831,7 +979,7 @@ class NGIApp(QMainWindow):
         self.series_container = QWidget()
         self.series_container.setStyleSheet(f"background:{BG2};")
         self.series_layout = QVBoxLayout(self.series_container)
-        self.series_layout.setSpacing(6)
+        self.series_layout.setSpacing(4)
         self.series_layout.setContentsMargins(2,2,4,2)
         self.series_layout.addStretch()
         scroll.setWidget(self.series_container)
@@ -950,15 +1098,42 @@ class NGIApp(QMainWindow):
         idx = len(self.series_panels) + 1
         color = CP[(idx-1) % len(CP)]
         panel = SeriesPanel(idx, color, self.T, self.series_container)
-        # Stretch'ten önce ekle
+        panel.del_btn.clicked.connect(lambda: self._del_specific(panel))
+        panel.vis_check.stateChanged.connect(lambda: self._replot_if_done())
         count = self.series_layout.count()
         self.series_layout.insertWidget(count-1, panel)
         self.series_panels.append(panel)
+
+    def _del_specific(self, panel):
+        if len(self.series_panels) <= 1: return
+        self.series_panels.remove(panel)
+        panel.deleteLater()
+
+    def _replot_if_done(self):
+        if not self.all_series: return
+        cur = self.tabs.currentIndex()
+        if cur == 1: self._plot_lp()
+        elif cur == 2: self._plot_dist()
+        elif cur == 4: self._show_compare()
+
+    def _select_all_series(self):
+        for p in self.series_panels: p.vis_check.setChecked(True)
+
+    def _deselect_all_series(self):
+        for p in self.series_panels: p.vis_check.setChecked(False)
+
+    def _visible_series(self):
+        """Sadece visible işaretli serileri döndür"""
+        return [sd for sd, p in zip(self.all_series, self.series_panels)
+                if p.vis_check.isChecked()]
 
     def _del_series(self):
         if len(self.series_panels) <= 1: return
         panel = self.series_panels.pop()
         panel.deleteLater()
+        # İndeks numaralarını güncelle
+        for i, p in enumerate(self.series_panels):
+            p.lbl_num_idx = i+1
 
     def _clear(self):
         for p in self.series_panels:
@@ -1164,7 +1339,7 @@ class NGIApp(QMainWindow):
             self.chk_lp_avg.blockSignals(False)
 
         notes = []
-        for sd in self.all_series:
+        for sd in self._visible_series():
             col = sd["color"]
             valid_runs = [r for r in sd["runs"] if "error" not in r]
             if not valid_runs: continue
@@ -1232,7 +1407,7 @@ class NGIApp(QMainWindow):
         ax = fig.add_subplot(111); ax.set_facecolor("#0e1525")
 
         ref_masses = None; warnings = []
-        for sd in self.all_series:
+        for sd in self._visible_series():
             if not sd["avg"]: continue
             ms = [sd["avg"]["avg_masses"].get(s,0) for s in vis_all]
             valid_runs = [r for r in sd["runs"] if "error" not in r]
@@ -1257,7 +1432,7 @@ class NGIApp(QMainWindow):
             ax.plot(x_all, upper, "--", color="#FF6060", lw=1.8, alpha=0.8, label=f"+{pct:.0f}%")
             ax.plot(x_all, lower, "--", color="#FF6060", lw=1.8, alpha=0.8, label=f"–{pct:.0f}%")
             ax.fill_between(x_all, lower, upper, color="#FF6060", alpha=0.05, zorder=1)
-            for sd in self.all_series:
+            for sd in self._visible_series():
                 if sd["is_ref"] or not sd["avg"]: continue
                 mt = [sd["avg"]["avg_masses"].get(s,0) for s in vis_all]
                 for s,tv,lo2,hi2 in zip(vis_all,mt,lower,upper):
@@ -1407,7 +1582,7 @@ class NGIApp(QMainWindow):
             canvas2.setMaximumHeight(260)
             ax1 = fig2.add_subplot(121); ax2 = fig2.add_subplot(122)
             ax1.set_facecolor("#0e1525"); ax2.set_facecolor("#0e1525")
-            valid_sds = [sd for sd in self.all_series if sd["avg"]]
+            valid_sds = [sd for sd in self._visible_series() if sd["avg"]]
             names = [sd["name"] for sd in valid_sds]
             mmads = [sd["avg"]["params"].get("mmad",(0,))[0] for sd in valid_sds]
             gsds  = [sd["avg"]["params"].get("gsd",(0,))[0] for sd in valid_sds]
@@ -1435,9 +1610,10 @@ class NGIApp(QMainWindow):
         ]
         tf=QFrame(); tf.setStyleSheet(f"background:#111827;border-radius:4px;border:1px solid #1a2a40;")
         tfl=QVBoxLayout(tf); tfl.setContentsMargins(2,2,2,2); tfl.setSpacing(1)
-        n_ser=len(self.all_series)
+        vis_ser = self._visible_series()
+        n_ser=len(vis_ser)
         widths=[138]+[104]*n_ser
-        hdrs_list=[T["param"]]+[sd["name"]+(" ★" if sd["is_ref"] else "") for sd in self.all_series]
+        hdrs_list=[T["param"]]+[sd["name"]+(" ★" if sd["is_ref"] else "") for sd in vis_ser]
         hframe=QFrame(); hframe.setStyleSheet("background:#1F4E79;border-radius:2px;")
         hfl=QHBoxLayout(hframe); hfl.setContentsMargins(2,2,2,2); hfl.setSpacing(0)
         for h,w in zip(hdrs_list,widths):
@@ -1458,7 +1634,7 @@ class NGIApp(QMainWindow):
             rv=None
             if ref_sd and ref_sd["avg"] and key in ref_sd["avg"]["params"]:
                 rv=ref_sd["avg"]["params"][key][0]
-            for sd in self.all_series:
+            for sd in vis_ser:
                 if not sd["avg"] or key not in sd["avg"]["params"]:
                     l2=QLabel("-"); l2.setFixedWidth(104); l2.setAlignment(Qt.AlignmentFlag.AlignCenter)
                     l2.setStyleSheet("color:#888;font-size:10px;background:transparent;")
@@ -1484,7 +1660,7 @@ class NGIApp(QMainWindow):
             lim_map={"ema":20,"fda":15,"usp":25}
             try: pct=lim_map.get(self.limit_type) or float(self.e_lim_pct.text())
             except: pct=20
-            for sd in self.all_series:
+            for sd in self._visible_series():
                 if sd["is_ref"] or not sd["avg"]: continue
                 f2=calc_f2(ref_sd["avg"]["avg_masses"],sd["avg"]["avg_masses"],co)
                 if f2 is None: continue
@@ -1602,7 +1778,7 @@ class NGIApp(QMainWindow):
         try: rsd_lim=float(self.e_rsd.text())
         except: rsd_lim=5.0
         try:
-            from ngi_citdas import make_pdf_multi
+            # make_pdf_multi bu dosyada tanimli
             make_pdf_multi(path,self.all_series,meta,
                            int(self.flow_combo.currentText()),
                            self.T,pct,rsd_lim,lang=self.lang)
@@ -1617,6 +1793,527 @@ class NGIApp(QMainWindow):
             import traceback
             QMessageBox.critical(self,"PDF Hatasi",
                 str(ex)+"\n\n"+traceback.format_exc()[-600:])
+
+def make_pdf_multi(path, all_series, meta, flow, T, limit_pct=20, rsd_lim=5.0, lang="TR"):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm, mm
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+    from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
+                                    Paragraph, Spacer, HRFlowable,
+                                    PageBreak, KeepTogether)
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    import os, math, numpy as np
+
+    # Font
+    fn = "Helvetica"; fb = "Helvetica-Bold"
+    for nm, ff in [("DejaVu","DejaVuSans.ttf"),("DejaVuB","DejaVuSans-Bold.ttf")]:
+        fp = resource_path(ff)
+        if os.path.exists(fp):
+            try: pdfmetrics.registerFont(TTFont(nm, fp))
+            except: pass
+    try:
+        from reportlab.pdfbase.pdfmetrics import getFont
+        getFont("DejaVuB"); fn="DejaVu"; fb="DejaVuB"
+    except: pass
+
+    W, H = A4
+    BW = W - 3*cm   # tam sayfa genislik: 17.7 cm
+
+    # Renksiz stiller
+    def ps(sz, bold=False, color=colors.black, align=TA_LEFT):
+        return ParagraphStyle("", fontName=fb if bold else fn,
+            fontSize=sz, textColor=color, alignment=align,
+            spaceBefore=1, spaceAfter=1, leading=sz+2)
+
+    sTitle = ps(12, True,  colors.black, TA_CENTER)
+    sSub   = ps(8,  False, colors.black, TA_CENTER)
+    sHdr   = ps(8,  True,  colors.black, TA_LEFT)
+    sLbl   = ps(7,  True,  colors.black, TA_LEFT)
+    sVal   = ps(7,  False, colors.black, TA_CENTER)
+    sValB  = ps(7,  True,  colors.black, TA_CENTER)
+    sRed   = ps(7,  True,  colors.red,   TA_CENTER)
+
+    # Tamamen renksiz tablo stili - sadece cizgiler
+    def ts_clean(bold_header=True):
+        return TableStyle([
+            # Hic dolgu yok
+            ("BACKGROUND", (0,0), (-1,-1), colors.white),
+            ("FONTSIZE",   (0,0), (-1,-1), 7),
+            ("FONTNAME",   (0,0), (-1,0),  fb),  # baslik bold
+            ("ALIGN",      (0,0), (-1,-1), "CENTER"),
+            ("ALIGN",      (0,0), (0,-1),  "LEFT"),   # ilk kolon sol
+            ("VALIGN",     (0,0), (-1,-1), "MIDDLE"),
+            ("TOPPADDING", (0,0), (-1,-1), 2),
+            ("BOTTOMPADDING",(0,0),(-1,-1), 2),
+            ("LEFTPADDING", (0,0),(-1,-1), 3),
+            ("RIGHTPADDING",(0,0),(-1,-1), 3),
+            # Dis cerceve kalin
+            ("BOX",        (0,0), (-1,-1), 1.0, colors.black),
+            # Baslik alti kalin cizgi
+            ("LINEBELOW",  (0,0), (-1,0),  1.0, colors.black),
+            # Ic yatay cizgiler ince
+            ("INNERGRID",  (0,0), (-1,-1), 0.3, colors.black),
+            # Alternatif satir golgesi yok - tamamen beyaz
+        ])
+
+    def make_section_title(text):
+        """Bolum basligi - dolgu yok, sadece bold + alt cizgi"""
+        return [
+            Paragraph(text, ps(9, True, colors.black)),
+            HRFlowable(width="100%", thickness=1.0, color=colors.black,
+                       spaceAfter=2),
+        ]
+
+    def fmt(v, decimals=4):
+        """Sayi formatlama: nokta yerine virgul"""
+        if v is None: return "-"
+        if isinstance(v, int): return str(v)
+        try: return f"{v:.{decimals}f}".replace(".", ",")
+        except: return str(v)
+
+    doc = SimpleDocTemplate(path, pagesize=A4,
+        leftMargin=1.5*cm, rightMargin=1.5*cm,
+        topMargin=1.5*cm,  bottomMargin=1.5*cm,
+        title="NGI Analysis Report")
+
+    co = NGI_CUTOFFS[flow]
+    story = []
+
+    # =========================================================================
+    # BASLIK BLOGU
+    # =========================================================================
+    if lang=="TR":
+        pdf_main_title = "NGI Kaskadit Impaktor Analiz Araci"
+        pdf_sub_title  = "Ph.Eur 2.9.18 / USP &lt;601&gt;  |  NGI Kaskadi Impaktoru Analizi"
+    else:
+        pdf_main_title = "Results and Analysis for Next Generation Impactor"
+        pdf_sub_title  = "Ph.Eur 2.9.18 / USP &lt;601&gt;  |  NGI Cascade Impactor Analysis"
+    story.append(Paragraph(pdf_main_title, sTitle))
+    story.append(Paragraph(pdf_sub_title, sSub))
+    story.append(HRFlowable(width="100%", thickness=1.5, color=colors.black,
+                             spaceBefore=3, spaceAfter=3))
+
+    # Meta bilgiler - tam genislik 2 kolonlu tablo
+    meta_data = [
+        [Paragraph("Date of Analysis:", sLbl),
+         Paragraph(meta.get("date",""), sVal),
+         Paragraph("Analyst:", sLbl),
+         Paragraph(meta.get("operator",""), sVal),
+         Paragraph("Flow Rate:", sLbl),
+         Paragraph(f"{flow} L/min", sValB)],
+        [Paragraph("Product Name:", sLbl),
+         Paragraph(meta.get("product",""), sVal),
+         Paragraph("Batch Number:", sLbl),
+         Paragraph(meta.get("batch",""), sVal),
+         Paragraph("Method:", sLbl),
+         Paragraph("EP / Ph.Eur 2.9.18", sVal)],
+    ]
+    cw_meta = [2.5*cm, (BW-5*cm)/2-2.5*cm, 2.5*cm, (BW-5*cm)/2-2.5*cm, 2.5*cm, 2.5*cm]
+    # 3 cift: label+value, esit pay
+    cw_meta = [2.4*cm, 3.4*cm, 2.4*cm, 3.4*cm, 2.2*cm, 3.3*cm]
+    mt = Table(meta_data, colWidths=cw_meta)
+    mt.setStyle(TableStyle([
+        ("BACKGROUND", (0,0),(-1,-1), colors.white),
+        ("FONTSIZE",   (0,0),(-1,-1), 7),
+        ("ALIGN",      (0,0),(-1,-1), "LEFT"),
+        ("VALIGN",     (0,0),(-1,-1), "MIDDLE"),
+        ("TOPPADDING", (0,0),(-1,-1), 2),
+        ("BOTTOMPADDING",(0,0),(-1,-1), 2),
+        ("LEFTPADDING", (0,0),(-1,-1), 3),
+        ("BOX",        (0,0),(-1,-1), 0.8, colors.black),
+        ("INNERGRID",  (0,0),(-1,-1), 0.3, colors.black),
+    ]))
+    story.append(mt)
+    story.append(Spacer(1, 3*mm))
+
+    # Cut-off tablosu - tam sayfa genisliginde
+    vis_stages = [s for s in ["S1","S2","S3","S4","S5","S6","S7","MOC"]
+                  if co.get(s,999) < 900]
+    n_co = len(vis_stages) + 1
+    co_cw = [BW/n_co] * n_co
+    co_hdr = [Paragraph("Cut-off D50 (um)", sLbl)] + \
+             [Paragraph(s, sLbl) for s in vis_stages]
+    co_val = [Paragraph(f"{flow} L/min", sValB)] + \
+             [Paragraph(fmt(co[s],3), sVal) for s in vis_stages]
+    co_tbl = Table([co_hdr, co_val], colWidths=co_cw)
+    co_tbl.setStyle(ts_clean())
+    story.append(co_tbl)
+    story.append(Spacer(1, 4*mm))
+
+    # =========================================================================
+    # HER SERI - HER RUN
+    # =========================================================================
+    for sd in all_series:
+        ref_tag = "  [REFERENCE]" if sd["is_ref"] else ""
+        for item in make_section_title(f"Series: {sd['name']}{ref_tag}"):
+            story.append(item)
+        story.append(Spacer(1, 2*mm))
+
+        for run in sd["runs"]:
+            run_items = []
+            run_items.append(Paragraph(
+                f"Run Number = {run['run_no']}  |  Sampling Flow Rate = {flow} L/min",
+                ps(8, True, colors.black)))
+            run_items.append(HRFlowable(width="100%", thickness=0.5,
+                color=colors.black, spaceBefore=1, spaceAfter=2))
+
+            if "error" in run:
+                run_items.append(Paragraph(
+                    f"Insufficient data (n={run.get('n',0)})", sVal))
+                story.append(KeepTogether(run_items))
+                story.append(Spacer(1,3*mm)); continue
+
+            # Kumulatif tablo - tam sayfa genisliginde
+            cum_cols = (["Kesme D50\n[um]","Kutle\n[mg]","Kumulatif\n[mg]",
+                        "Kumulatif\n[%]","Gecerli","Probit z"]
+                if lang=="TR" else
+                ["Cut-off D50\n[um]","Mass\n[mg]","Cumulative mass\n[mg]",
+                 "Cumulative\n[%]","Valid","Probit z"])
+            n_cum = len(cum_cols)
+            # Genislikler: D50=2cm, Mass=2.5cm, CumMass=2.5cm, Cum%=2.5cm, Valid=1.3cm, Probit=kalan
+            cw_cum_fixed = [2.0*cm, 2.5*cm, 2.5*cm, 2.3*cm, 1.3*cm]
+            cw_cum_last  = BW - sum(cw_cum_fixed)
+            cw_cum = cw_cum_fixed + [cw_cum_last]
+
+            cum_hdr_row = [Paragraph(h, sLbl) for h in cum_cols]
+            cum_data = [cum_hdr_row]
+            valid_st = {v["stage"] for v in run["valid"]}
+            cum_m = 0.0
+            ts_cum = ts_clean()
+            row_idx = 1
+
+            for row in run["cum_data"]:
+                s = row["stage"]
+                # Sadece ISM stage ve Throat goster
+                if s not in (["Throat"] + [x for x in ALL_KEYS if co.get(x,999)<900]):
+                    continue
+                cum_m += row["mass"]
+                iv = s in valid_st
+                pz = ""
+                if 0 < row["u_pct"] < 100:
+                    try: pz = fmt(norm.ppf(row["u_pct"]/100), 4)
+                    except: pass
+                d50_str = fmt(row["d50"],3) if row["d50"]<900 else "---"
+                cum_data.append([
+                    Paragraph(d50_str, sVal),
+                    Paragraph(fmt(row["mass"],4), sValB if iv else sVal),
+                    Paragraph(fmt(cum_m,4), sVal),
+                    Paragraph(fmt(row["u_pct"],3), sValB if iv else sVal),
+                    Paragraph("*" if iv else "", sValB),
+                    Paragraph(pz, sVal),
+                ])
+                if iv:
+                    # Valid satirlari: sadece bold, dolgu yok
+                    ts_cum.add("FONTNAME",(0,row_idx),(-1,row_idx), fb)
+                    ts_cum.add("LINEABOVE",(0,row_idx),(-1,row_idx), 0.5, colors.black)
+                    ts_cum.add("LINEBELOW",(0,row_idx),(-1,row_idx), 0.5, colors.black)
+                row_idx += 1
+
+            t_cum = Table(cum_data, colWidths=cw_cum, repeatRows=1)
+            t_cum.setStyle(ts_cum)
+            run_items.append(t_cum)
+            run_items.append(Spacer(1,2*mm))
+
+            # Parametreler - 2 satir, tam sayfa
+            # Satir 1: FPD, MMAD, GSD, Intercept, Slope, R2, n
+            p1_h = ["FPD (<=5um)\n[mg]","MMAD\n[um]","GSD",
+                    "Intercept","Slope","R^2","n"]
+            p1_v = [fmt(run["fpd"],4), fmt(run["mmad"],4), fmt(run["gsd"],4),
+                    fmt(run["intercept"],3), fmt(run["slope"],3),
+                    fmt(run["r2"],4), str(run["n"])]
+            # Satir 2: FPF, Metered, Delivered
+            p2_h = ["Fine Particle\nFraction [%]","Metered\n[mg]",
+                    "Delivered\n[mg]","","","",""]
+            p2_v = [fmt(run["fpf"],3), fmt(run["metered"],4),
+                    fmt(run["delivered"],4),"","","",""]
+
+            n_p = len(p1_h)
+            cw_p = [BW/n_p]*n_p
+            t_p = Table(
+                [[Paragraph(h,sLbl) for h in p1_h],
+                 [Paragraph(v,sValB if i<3 else sVal) for i,v in enumerate(p1_v)],
+                 [Paragraph(h,sLbl) for h in p2_h],
+                 [Paragraph(v,sValB if i<3 else sVal) for i,v in enumerate(p2_v)]],
+                colWidths=cw_p)
+            ts_p = ts_clean()
+            # Baslik satirlari (0 ve 2) bold, deger satirlari (1 ve 3) normal
+            ts_p.add("FONTNAME",(0,2),(-1,2), fb)
+            ts_p.add("LINEABOVE",(0,2),(-1,2), 1.0, colors.black)
+            t_p.setStyle(ts_p)
+            run_items.append(t_p)
+            run_items.append(Spacer(1,3*mm))
+            story.append(KeepTogether(run_items))
+
+        story.append(Spacer(1,2*mm))
+
+    # =========================================================================
+    # TABULAR SUMMARY
+    # =========================================================================
+    story.append(PageBreak())
+    for item in make_section_title("Tabular Summary — NGI Stage Masses per Discharge"):
+        story.append(item)
+    story.append(Spacer(1,3*mm))
+
+    for sd in all_series:
+        valid_runs = [r for r in sd["runs"] if "error" not in r]
+        if not valid_runs: continue
+        n_r = len(valid_runs)
+
+        story.append(Paragraph(
+            f"Series: {sd['name']}" + ("  [REF]" if sd["is_ref"] else ""),
+            ps(8, True, colors.black)))
+        story.append(Spacer(1,1*mm))
+
+        # Stage kutleleri - tam genislik
+        disp_s = [s for s in ["Throat","Presep","S1","S2","S3","S4","S5","S6","S7","MOC"]]
+        ts_hdr = ([Paragraph("Stage",sLbl)] +
+                  [Paragraph(f"Run {r['run_no']}",sLbl) for r in valid_runs] +
+                  [Paragraph("Mean",sLbl),Paragraph("SD",sLbl),Paragraph("%RSD",sLbl)])
+        n_ts_col = 1 + n_r + 3
+        cw_ts_lbl = 1.8*cm
+        cw_ts_rest = (BW - cw_ts_lbl) / (n_r+3)
+        cw_ts = [cw_ts_lbl] + [cw_ts_rest]*(n_r+3)
+
+        ts_rows = [ts_hdr]
+        for s in disp_s:
+            vals = [r["masses"].get(s,0) for r in valid_runs]
+            if all(v==0 for v in vals): continue
+            mean_v = float(np.mean(vals))
+            sd_v   = float(np.std(vals,ddof=1)) if len(vals)>1 else 0.0
+            rsd_v  = sd_v/mean_v*100 if mean_v else 0.0
+            ts_rows.append(
+                [Paragraph(s, sLbl)] +
+                [Paragraph(fmt(v,4),sVal) for v in vals] +
+                [Paragraph(fmt(mean_v,4),sValB),
+                 Paragraph(fmt(sd_v,4),sVal),
+                 Paragraph(fmt(rsd_v,2),sVal)])
+        t_ts = Table(ts_rows, colWidths=cw_ts, repeatRows=1)
+        t_ts.setStyle(ts_clean())
+        story.append(t_ts)
+        story.append(Spacer(1,3*mm))
+
+        # Parametre ozet - tam genislik
+        story.append(Paragraph("Dose and Particle Size Characterisation",
+            ps(7,True,colors.black)))
+        story.append(Spacer(1,1*mm))
+        pkeys = [("metered","Metered [mg]"),("delivered","Delivered [mg]"),
+                 ("fpd","FPD [mg]"),("fpf","FPF [%]"),
+                 ("mmad","MMAD [um]"),("gsd","GSD"),
+                 ("slope","Slope"),("intercept","Intercept"),("r2","R^2")]
+        p_hdr2 = ([Paragraph("Parameter",sLbl)] +
+                  [Paragraph(f"Run {r['run_no']}",sLbl) for r in valid_runs] +
+                  [Paragraph("Mean",sLbl),Paragraph("SD",sLbl),Paragraph("%RSD",sLbl)])
+        cw_p2 = [2.8*cm] + [(BW-2.8*cm)/(n_r+3)]*(n_r+3)
+        p_rows2 = [p_hdr2]
+        for k,lbl in pkeys:
+            vals2 = [r.get(k,0) for r in valid_runs if k in r]
+            if not vals2: continue
+            mean2=float(np.mean(vals2))
+            sd2=float(np.std(vals2,ddof=1)) if len(vals2)>1 else 0.0
+            rsd2=sd2/mean2*100 if mean2 else 0.0
+            is_key = k in ("fpd","fpf","mmad","gsd")
+            sv = ps(7,True,colors.black,TA_CENTER) if is_key else sVal
+            rsd_style = sRed if rsd2 > rsd_lim else sVal
+            p_rows2.append(
+                [Paragraph(lbl, sLbl if not is_key else ps(7,True,colors.black))] +
+                [Paragraph(fmt(r.get(k,0),4),sv) for r in valid_runs] +
+                [Paragraph(fmt(mean2,4),sv),
+                 Paragraph(fmt(sd2,4),sVal),
+                 Paragraph(fmt(rsd2,2),rsd_style)])
+        t_p2 = Table(p_rows2, colWidths=cw_p2, repeatRows=1)
+        t_p2.setStyle(ts_clean())
+        story.append(t_p2)
+        story.append(Spacer(1,5*mm))
+
+    # =========================================================================
+    # REFERANS KARSILASTIRMA
+    # =========================================================================
+    ref_sd = next((sd for sd in all_series if sd["is_ref"]), None)
+    if ref_sd and ref_sd["avg"]:
+        story.append(PageBreak())
+        for item in make_section_title(
+            f"Reference Comparison — {ref_sd['name']}  |  Limit: +/-{limit_pct:.0f}%"):
+            story.append(item)
+        story.append(Spacer(1,3*mm))
+
+        ref_m = ref_sd["avg"]["avg_masses"]
+        vis_cmp = ["Throat"] + [s for s in GRAPH_STAGES if co.get(s,999)<900]
+        test_series = [sd for sd in all_series if not sd["is_ref"] and sd["avg"]]
+
+        for sd in test_series:
+            f2 = calc_f2(ref_m, sd["avg"]["avg_masses"], co)
+            f2_pass = f2 is not None and f2 >= 50
+            if f2 is not None:
+                f2_txt = "f2 = " + fmt(f2,1) + "  " + \
+                         ("Similar (>=50)" if f2_pass else "Different (<50)")
+            else:
+                f2_txt = "f2 = N/A"
+            story.append(Paragraph(f"{sd['name']}   |   {f2_txt}",
+                ps(8, True, colors.black)))
+            story.append(Spacer(1,1*mm))
+
+            cmp_hdr = [Paragraph(h,sLbl) for h in
+                ["Stage","Reference\n[mg]","Test\n[mg]",
+                 "Diff %",f"Upper\n+{limit_pct:.0f}%",
+                 f"Lower\n-{limit_pct:.0f}%","Result"]]
+            cmp_cw = [BW/7]*7
+            cmp_rows = [cmp_hdr]
+            ts_cmp = ts_clean()
+            for ri2, s in enumerate(vis_cmp):
+                rv = ref_m.get(s,0); tv = sd["avg"]["avg_masses"].get(s,0)
+                diff = (tv-rv)/rv*100 if rv else 0.0
+                in_lim = abs(diff) <= limit_pct
+                res_clr = colors.HexColor("#006600") if in_lim else colors.red
+                cmp_rows.append([
+                    Paragraph(s, sLbl),
+                    Paragraph(fmt(rv,4), sVal),
+                    Paragraph(fmt(tv,4), sVal),
+                    Paragraph(f"{diff:+,.2f}%".replace('.',','), sVal),
+                    Paragraph(fmt(rv*(1+limit_pct/100),4), sVal),
+                    Paragraph(fmt(rv*(1-limit_pct/100),4), sVal),
+                    Paragraph("PASS" if in_lim else "FAIL",
+                        ps(7,True,colors.black,TA_CENTER)),
+                ])
+                if not in_lim:
+                    ts_cmp.add("FONTNAME",(0,ri2+1),(-1,ri2+1),fb)
+            t_cmp = Table(cmp_rows, colWidths=cmp_cw, repeatRows=1)
+            t_cmp.setStyle(ts_cmp)
+            story.append(t_cmp)
+            story.append(Spacer(1,4*mm))
+
+    # =========================================================================
+    # GRAFIK SAYFASI
+    # =========================================================================
+    story.append(PageBreak())
+    for item in make_section_title("Graphical Analysis"):
+        story.append(item)
+    story.append(Spacer(1,3*mm))
+
+    import io as _io
+    import matplotlib; matplotlib.use("Agg")
+    import matplotlib.pyplot as _plt
+    from reportlab.platypus import Image as RLImage
+
+    BW_COLORS = ["black","#333","#555","#777","#999","#BBB"]
+    BW_LS     = ["-","--","-.",":","--","-."]
+
+    # Log-Probit
+    fig_lp, ax_lp = _plt.subplots(figsize=(7,3.8))
+    ax_lp.set_facecolor("white"); fig_lp.patch.set_facecolor("white")
+    for si, sd in enumerate(all_series):
+        valid_runs = [r for r in sd["runs"] if "error" not in r]
+        if not valid_runs: continue
+        col = BW_COLORS[si % len(BW_COLORS)]
+        ls  = BW_LS[si % len(BW_LS)]
+        lw  = 2.0 if sd["is_ref"] else 1.3
+        min_len = min(len(r["x_reg"]) for r in valid_runs)
+        avg_x = sum(r["x_reg"][:min_len] for r in valid_runs)/len(valid_runs)
+        avg_y = sum(r["y_reg"][:min_len] for r in valid_runs)/len(valid_runs)
+        b_avg = sum(r["b"] for r in valid_runs)/len(valid_runs)
+        a_avg = sum(r["a"] for r in valid_runs)/len(valid_runs)
+        ax_lp.plot(avg_x, avg_y, "o", color=col, ms=5, zorder=4)
+        xr = np.linspace(min(avg_x)-0.15, max(avg_x)+0.15, 60)
+        ax_lp.plot(xr, a_avg+b_avg*xr, ls=ls, color=col, lw=lw,
+            label=sd["name"]+(" [REF]" if sd["is_ref"] else ""))
+        if sd["avg"] and "mmad" in sd["avg"]["params"]:
+            mv = sd["avg"]["params"]["mmad"][0]
+            if mv > 0:
+                ax_lp.axvline(math.log10(mv), color=col, lw=0.7, ls=":", alpha=0.8)
+    ax_lp.set_xlabel("log10(D50, um)", fontsize=9)
+    ax_lp.set_ylabel("Probit z", fontsize=9)
+    ax_lp.set_title(f"Log-Probit  [{flow} L/min]  (Series Averages)", fontsize=10)
+    ax_lp.legend(fontsize=7, framealpha=0.9)
+    ax_lp.grid(True, ls="--", alpha=0.3, color="gray")
+    ax_lp.tick_params(labelsize=8)
+    for sp in ax_lp.spines.values(): sp.set_color("black"); sp.set_linewidth(0.8)
+    fig_lp.tight_layout()
+    buf_lp = _io.BytesIO()
+    fig_lp.savefig(buf_lp, format="png", dpi=150, bbox_inches="tight", facecolor="white")
+    buf_lp.seek(0); _plt.close(fig_lp)
+    story.append(RLImage(buf_lp, width=BW, height=BW*3.8/7))
+
+    # Log-Probit alti: MMAD degerleri tablosu
+    mmad_rows = [[Paragraph("Series", sLbl),
+                  Paragraph("MMAD [um]", sLbl),
+                  Paragraph("GSD", sLbl),
+                  Paragraph("Slope", sLbl),
+                  Paragraph("Intercept", sLbl),
+                  Paragraph("R^2", sLbl)]]
+    for sd2 in all_series:
+        if not sd2["avg"]: continue
+        pr = sd2["avg"]["params"]
+        mmad_rows.append([
+            Paragraph(sd2["name"] + (" [REF]" if sd2["is_ref"] else ""), sLbl),
+            Paragraph(fmt(pr.get("mmad",(0,))[0], 3), sValB),
+            Paragraph(fmt(pr.get("gsd",(0,))[0], 3), sVal),
+            Paragraph(fmt(pr.get("slope",(0,))[0], 3), sVal),
+            Paragraph(fmt(pr.get("intercept",(0,))[0], 3), sVal),
+            Paragraph(fmt(pr.get("r2",(0,))[0], 4), sVal),
+        ])
+    n_mc = len(mmad_rows[0])
+    t_mmad = Table(mmad_rows, colWidths=[BW/n_mc]*n_mc)
+    t_mmad.setStyle(ts_clean())
+    story.append(t_mmad)
+    story.append(Spacer(1,5*mm))
+
+    # APSD
+    vis_ap = ["Throat"] + [s for s in ["S1","S2","S3","S4","S5","S6","S7","MOC"]
+                            if co.get(s,999)<900]
+    x_ap = list(range(len(vis_ap)))
+    fig_ap, ax_ap = _plt.subplots(figsize=(7,3.8))
+    ax_ap.set_facecolor("white"); fig_ap.patch.set_facecolor("white")
+    ref_ap = None
+    for si, sd in enumerate(all_series):
+        if not sd["avg"]: continue
+        col = BW_COLORS[si % len(BW_COLORS)]
+        ls  = BW_LS[si % len(BW_LS)]
+        lw  = 2.0 if sd["is_ref"] else 1.3
+        ms_ap = [sd["avg"]["avg_masses"].get(s,0) for s in vis_ap]
+        valid_runs = [r for r in sd["runs"] if "error" not in r]
+        sds_ap = []
+        for s in vis_ap:
+            vals=[r["masses"].get(s,0) for r in valid_runs]
+            sds_ap.append(float(np.std(vals,ddof=1)) if len(vals)>1 else 0.0)
+        ax_ap.plot(x_ap, ms_ap, color=col, lw=lw, ms=5, marker="o", linestyle=ls if isinstance(ls,str) else "-",
+            label=sd["name"]+(" [REF]" if sd["is_ref"] else ""))
+        ax_ap.fill_between(x_ap, [m-s for m,s in zip(ms_ap,sds_ap)],
+            [m+s for m,s in zip(ms_ap,sds_ap)], color=col, alpha=0.08)
+        if sd["is_ref"]: ref_ap = ms_ap
+    if ref_ap:
+        up = [v*(1+limit_pct/100) for v in ref_ap]
+        lo = [v*(1-limit_pct/100) for v in ref_ap]
+        ax_ap.plot(x_ap, up, "--", color="black", lw=0.8, alpha=0.7,
+            label=f"+{limit_pct:.0f}%")
+        ax_ap.plot(x_ap, lo, "--", color="black", lw=0.8, alpha=0.7,
+            label=f"-{limit_pct:.0f}%")
+    ax_ap.set_xticks(x_ap); ax_ap.set_xticklabels(vis_ap, rotation=20, ha="right", fontsize=8)
+    ax_ap.set_xlabel("Stage", fontsize=9)
+    ax_ap.set_ylabel("Mean Mass (mg/actuation)", fontsize=9)
+    ax_ap.set_title(f"APSD Distribution  [{flow} L/min]  (Series Averages +/- SD)", fontsize=10)
+    ax_ap.legend(fontsize=7, framealpha=0.9)
+    ax_ap.grid(True, ls="--", alpha=0.3, color="gray")
+    ax_ap.tick_params(labelsize=8)
+    for sp in ax_ap.spines.values(): sp.set_color("black"); sp.set_linewidth(0.8)
+    fig_ap.tight_layout()
+    buf_ap = _io.BytesIO()
+    fig_ap.savefig(buf_ap, format="png", dpi=150, bbox_inches="tight", facecolor="white")
+    buf_ap.seek(0); _plt.close(fig_ap)
+    story.append(RLImage(buf_ap, width=BW, height=BW*3.8/7))
+
+    # Footer
+    story.append(Spacer(1,4*mm))
+    story.append(HRFlowable(width="100%", thickness=0.8, color=colors.black))
+    story.append(Paragraph(
+        f"NGI Analysis Tool v5  |  Ph.Eur 2.9.18 / USP &lt;601&gt;  |  "
+        f"Generated: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+        ps(6.5, False, colors.black, TA_CENTER)))
+
+    doc.build(story)
+
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
