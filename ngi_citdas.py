@@ -1330,6 +1330,37 @@ class NGIApp(QMainWindow):
         return [sd for sd,p in zip(self.all_series, self.series_panels)
                 if p.vis_check.isChecked()]
 
+    def _toggle_lang(self):
+        self.lang="EN" if self.lang=="TR" else "TR"
+        self.T=L[self.lang]; T=self.T
+        self.setWindowTitle(T["title"])
+        self.lbl_title.setText(T["title"])
+        self.lbl_sub.setText(T["subtitle"])
+        self.btn_lang.setText(T["lang_btn"])
+        self.btn_calc.setText(T["calculate"])
+        self.btn_clr.setText(T["clear"])
+        self.btn_pdf.setText(T["export_pdf"])
+        self.btn_csv.setText(T["load_csv"])
+        self.btn_add.setText("+ "+T["add_series"])
+        self.chk_lp_avg.setText(T["lp_avg_only"])
+        self.chk_delivered_tp.setText(T["delivered_tp"])
+        try:
+            self.btn_sel_all.setText("✓ "+("Tümü" if self.lang=="TR" else "All"))
+            self.btn_sel_none.setText("✕ "+("Gizle" if self.lang=="TR" else "Hide"))
+        except: pass
+        self._refresh_cutoffs()
+        for p in self.series_panels: p.update_lang(T)
+        for i,k in enumerate(["tab_summary","tab_scatter","tab_plot","tab_dist","tab_compare"]):
+            self.tabs.setTabText(i, T[k])
+        self._update_series_count()
+        if self.all_series:
+            cur=self.tabs.currentIndex()
+            if cur==0: self._show_summary()
+            elif cur==1: self._plot_scatter()
+            elif cur==2: self._plot_lp()
+            elif cur==3: self._plot_dist()
+            elif cur==4: self._show_compare()
+
     def _clear(self):
         for p in self.series_panels:
             for ri in range(RUNS_PER_SER):
@@ -2180,12 +2211,38 @@ class SplashScreen(QWidget):
             if self._val>=th: self.status_lbl.setText(msg)
         if self._val>=100: self._timer.stop()
 
+    def _tick_with_done(self):
+        self._val=min(self._val+2,100); self.progress.setValue(self._val)
+        for th,msg in self._msgs:
+            if self._val>=th: self.status_lbl.setText(msg)
+        if self._val>=100:
+            self._timer.stop()
+            QTimer.singleShot(300, getattr(self,"_on_done", lambda:None))
+
 
 if __name__ == "__main__":
     app=QApplication(sys.argv)
     app.setApplicationName("NGI Impactor Analysis")
-    splash=SplashScreen(); splash.show(); app.processEvents()
+
+    # Splash hemen göster - NGIApp henüz oluşturulmadan önce
+    splash=SplashScreen()
+    splash.show()
+    app.processEvents()  # Splash ekrana çizilsin
+
+    # NGIApp'ı oluştur (bu biraz sürer)
     win=NGIApp()
-    QTimer.singleShot(2400,splash.close)
-    QTimer.singleShot(2400,win.show)
+
+    # Splash progress tamamlanana kadar bekle (min 1.5 sn),
+    # sonra splash kapat & ana pencereyi aç
+    def _launch():
+        splash.close()
+        win.show()
+        win.raise_()
+        win.activateWindow()
+
+    # Splash'in progress'i bittiğinde launch et
+    # Progress 100'e gelince _tick durduruyor, o andan 300ms sonra aç
+    splash._on_done = _launch
+    splash._timer.timeout.disconnect()
+    splash._timer.timeout.connect(splash._tick_with_done)
     sys.exit(app.exec())
