@@ -518,13 +518,16 @@ class CalcThread(QThread):
 # ═══════════════════════════════════════════════════════════════════════════════
 # SERİ PANELİ
 # ═══════════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# VERİ GİRİŞ POPUP
+# ═══════════════════════════════════════════════════════════════════════════════
 class DataEntryDialog(QDialog):
-    """Stage veri giriş popup"""
     def __init__(self, series_panel, T, color, parent=None):
         super().__init__(parent)
         self.sp = series_panel; self.T = T; self.color = color
         self.setWindowTitle(f"Veri Girisi - {series_panel.name_edit.text()}")
-        self.setMinimumSize(620, 520)
+        self.setMinimumSize(600, 500)
         self.setStyleSheet(STYLE)
         self._build()
         self._load_existing()
@@ -532,618 +535,477 @@ class DataEntryDialog(QDialog):
     def _build(self):
         vl = QVBoxLayout(self)
         vl.setSpacing(6); vl.setContentsMargins(10,10,10,10)
-
-        # Başlık
         hdr = QLabel(f"  {self.sp.name_edit.text()} — Stage Kütleleri (mg)")
         hdr.setStyleSheet(f"color:{self.color};font-weight:bold;font-size:14px;"
             f"background:{BG3};border-left:4px solid {self.color};padding:6px;border-radius:4px;")
         vl.addWidget(hdr)
-
-        # Yapıştır butonu
-        paste_row = QHBoxLayout()
-        lbl_p = QLabel("Excel/Word'den tüm sütunları kopyalayıp buraya yapıştırabilirsiniz:")
-        lbl_p.setStyleSheet("color:#7090b0;font-size:11px;")
-        paste_row.addWidget(lbl_p)
-        paste_row.addStretch()
-        paste_all_btn = QPushButton("📋 Tümünü Yapıştır")
-        paste_all_btn.setFixedSize(140,28)
-        paste_all_btn.setStyleSheet("font-size:11px;")
-        paste_all_btn.clicked.connect(self._paste_all)
-        paste_row.addWidget(paste_all_btn)
-        vl.addLayout(paste_row)
-
-        # Grid
-        scroll = QScrollArea(); scroll.setWidgetResizable(True)
-        grid_widget = QWidget()
-        grid = QGridLayout(grid_widget)
+        pr = QHBoxLayout()
+        lp = QLabel("Excel/Word'den kopyalayip yapistiriniz:")
+        lp.setStyleSheet("color:#7090b0;font-size:11px;")
+        pr.addWidget(lp); pr.addStretch()
+        pb = QPushButton("Yapistir (Tum Sütunlar)")
+        pb.setFixedSize(180,28); pb.setStyleSheet("font-size:11px;")
+        pb.clicked.connect(self._paste_all); pr.addWidget(pb)
+        vl.addLayout(pr)
+        sc = QScrollArea(); sc.setWidgetResizable(True)
+        gw = QWidget(); grid = QGridLayout(gw)
         grid.setSpacing(3); grid.setContentsMargins(4,4,4,4)
-
-        # Başlık satırı
-        for ci, txt in enumerate(["Stage", "Run 1", "Run 2", "Run 3"]):
-            lbl = QLabel(txt)
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setStyleSheet(f"color:{self.color if ci>0 else '#7090b0'};"
-                f"font-weight:bold;font-size:12px;background:{BG3};"
-                f"border-radius:3px;padding:4px;")
-            grid.addWidget(lbl, 0, ci)
-
+        for ci, txt in enumerate(["Stage","Run 1","Run 2","Run 3"]):
+            l = QLabel(txt); l.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            l.setStyleSheet(f"color:{self.color if ci>0 else '#7090b0'};"
+                f"font-weight:bold;font-size:12px;background:{BG3};border-radius:3px;padding:4px;")
+            grid.addWidget(l, 0, ci)
         self.entries = [{} for _ in range(RUNS_PER_SER)]
         for si, s in enumerate(DISP_STAGES):
-            row_i = si + 1
             lc = "#FFD700" if s=="Presep" else "#aac8e8"
             lbl = QLabel(s)
             lbl.setStyleSheet(f"color:{lc};font-size:13px;font-weight:bold;"
-                f"min-width:60px;background:transparent;")
-            lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            grid.addWidget(lbl, row_i, 0)
+                "min-width:60px;background:transparent;")
+            lbl.setAlignment(Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter)
+            grid.addWidget(lbl, si+1, 0)
             for ri in range(RUNS_PER_SER):
                 e = QLineEdit("0.0000")
                 e.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 e.setFixedHeight(30)
                 e.setStyleSheet("font-size:12px;padding:2px 6px;")
-                e.focusInEvent = lambda ev, _e=e: (_e.selectAll()) or QLineEdit.focusInEvent(_e, ev)
-                grid.addWidget(e, row_i, ri+1)
+                e.focusInEvent = lambda ev, _e=e: (_e.selectAll() or
+                    QLineEdit.focusInEvent(_e, ev))
+                grid.addWidget(e, si+1, ri+1)
                 self.entries[ri][s] = e
-
-        scroll.setWidget(grid_widget)
-        vl.addWidget(scroll, 1)
-
-        # Butonlar
+        sc.setWidget(gw); vl.addWidget(sc, 1)
         btns = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok |
-            QDialogButtonBox.StandardButton.Cancel)
+            QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
         btns.button(QDialogButtonBox.StandardButton.Ok).setText("Kaydet")
-        btns.button(QDialogButtonBox.StandardButton.Cancel).setText("İptal")
+        btns.button(QDialogButtonBox.StandardButton.Cancel).setText("Iptal")
         btns.accepted.connect(self._save); btns.rejected.connect(self.reject)
         vl.addWidget(btns)
 
     def _load_existing(self):
-        """Mevcut değerleri yükle"""
         for ri in range(RUNS_PER_SER):
             for s in DISP_STAGES:
-                val = self.sp.entries[ri][s].text()
-                self.entries[ri][s].setText(val)
+                self.entries[ri][s].setText(self.sp.entries[ri][s].text())
 
     def _save(self):
-        """Değerleri series panel'e yaz"""
         for ri in range(RUNS_PER_SER):
             for s in DISP_STAGES:
                 self.sp.entries[ri][s].setText(self.entries[ri][s].text())
         self.accept()
 
     def _paste_all(self):
-        cb = QApplication.clipboard()
-        text = cb.text()
-        if not text.strip(): return
-        rows = self._parse_paste(text)
-        if not rows:
-            QMessageBox.warning(self, "", "Gecerli veri bulunamadi (11 sutun bekleniyor)"); return
-        all_s = ["Device","Throat","Presep","S1","S2","S3","S4","S5","S6","S7","MOC"]
-        for ri, row_vals in enumerate(rows[:RUNS_PER_SER]):
-            for si, val in enumerate(row_vals[:11]):
-                s = all_s[si]
-                if s in self.entries[ri]:
-                    self.entries[ri][s].setText(f"{val:.4f}")
-
-    def _parse_paste(self, text):
         import re
+        text = QApplication.clipboard().text()
+        if not text.strip(): return
         lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
-        if not lines: return None
-        def split_line(line):
-            if "\t" in line: return [t.strip() for t in line.split("\t")]
-            return [t.strip() for t in re.split(r"\s{2,}|\s+", line.strip())]
-        def is_header(line):
-            parts = split_line(line)
-            first = parts[0] if parts else ""
-            try: float(first.replace(",",".").replace(" ","")); return False
+        def split_line(ln):
+            if '\t' in ln: return [t.strip() for t in ln.split('\t')]
+            return [t.strip() for t in re.split(r'\s{2,}|\s+', ln.strip())]
+        def is_hdr(ln):
+            p=split_line(ln)
+            try: float(p[0].replace(',','.').replace(' ','')); return False
             except: return True
-        if is_header(lines[0]): lines = lines[1:]
-        if not lines: return None
-        result = []
-        for line in lines:
-            tokens = split_line(line)
+        if lines and is_hdr(lines[0]): lines=lines[1:]
+        all_s=["Device","Throat","Presep","S1","S2","S3","S4","S5","S6","S7","MOC"]
+        for ri, line in enumerate(lines[:RUNS_PER_SER]):
+            tokens=split_line(line)
             try:
-                vals = [float(t.replace(",",".").replace(" ","")) for t in tokens if t]
-                if len(vals) >= 11: result.append(vals[:11])
-                elif len(vals) >= 10: result.append([0.0]+vals[:10])
+                vals=[float(t.replace(',','.').replace(' ','')) for t in tokens if t]
+                if len(vals)>=10:
+                    if len(vals)<11: vals=[0.0]+vals
+                    for si,val in enumerate(vals[:11]):
+                        s=all_s[si]
+                        if s in self.entries[ri]:
+                            self.entries[ri][s].setText(f"{val:.4f}")
             except: pass
-        return result if result else None
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SERİ PANELİ — Kompakt satır
+# ═══════════════════════════════════════════════════════════════════════════════
 class SeriesPanel(QFrame):
     def __init__(self, idx, color, T, parent=None):
         super().__init__(parent)
-        self.idx = idx; self.color = color; self.T = T
-        self.setFrameShape(QFrame.Shape.StyledPanel)
-        self.setStyleSheet(f"""
-            QFrame {{
-                background: {BG3};
-                border: 1px solid #2a4060;
-                border-left: 3px solid {color};
-                border-radius: 6px;
-            }}
-        """)
+        self.idx=idx; self.color=color; self.T=T
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setStyleSheet(f"background:{BG2};border-bottom:0.5px solid #1a2a40;")
+        self.setFixedHeight(36)
+        self.entries=[{s:QLineEdit("0.000") for s in DISP_STAGES}
+                       for _ in range(RUNS_PER_SER)]
         self._build()
 
     def _build(self):
-        layout = QHBoxLayout(self)
-        layout.setSpacing(6); layout.setContentsMargins(8,5,8,5)
-
-        # Renk göstergesi
-        color_bar = QFrame()
-        color_bar.setFixedWidth(4)
-        color_bar.setStyleSheet(f"background:{self.color};border-radius:2px;")
-        layout.addWidget(color_bar)
-
-        # İsim
-        self.name_edit = QLineEdit(f"Seri {self.idx}")
-        self.name_edit.setStyleSheet(f"font-weight:bold;font-size:13px;border-left:none;")
-        self.name_edit.setMinimumWidth(120)
-        layout.addWidget(self.name_edit, 1)
-
-        # Referans checkbox (sadece 1. seri)
-        if self.idx == 1:
-            self.ref_check = QCheckBox(self.T["ref_check"])
-            self.ref_check.setStyleSheet(f"color:{GOLD};font-weight:bold;font-size:12px;")
-            layout.addWidget(self.ref_check)
-        else:
-            self.ref_check = None
-
-        # Düzenle butonu
-        self.edit_btn = QPushButton("✏ Düzenle")
-        self.edit_btn.setFixedSize(90, 28)
-        self.edit_btn.setStyleSheet(f"background:#1a3a6a;border:1px solid #2a5a9a;font-size:12px;border-radius:4px;")
-        self.edit_btn.clicked.connect(self._open_edit)
-        layout.addWidget(self.edit_btn)
-
+        hl = QHBoxLayout(self)
+        hl.setSpacing(4); hl.setContentsMargins(6,3,6,3)
+        # Renk çubuğu
+        bar=QFrame(); bar.setFixedSize(3,22)
+        bar.setStyleSheet(f"background:{self.color};border-radius:1px;")
+        hl.addWidget(bar)
         # Görünürlük checkbox
-        self.vis_check = QCheckBox()
-        self.vis_check.setChecked(True)
+        self.vis_check=QCheckBox(); self.vis_check.setChecked(True)
         self.vis_check.setToolTip("Grafikte göster/gizle")
         self.vis_check.setStyleSheet(f"""
-            QCheckBox::indicator {{ width:16px; height:16px; border:2px solid {self.color};
-                border-radius:3px; background:transparent; }}
-            QCheckBox::indicator:checked {{ background:{self.color}; }}
+            QCheckBox::indicator{{width:13px;height:13px;border:1.5px solid {self.color};
+                border-radius:2px;background:transparent;}}
+            QCheckBox::indicator:checked{{background:{self.color};}}
         """)
-        layout.addWidget(self.vis_check)
-
-        # Sil butonu
-        self.del_btn = QPushButton("✕")
-        self.del_btn.setFixedSize(28, 28)
-        self.del_btn.setStyleSheet(f"background:#3a1a1a;border:1px solid #6a2020;font-size:12px;border-radius:4px;")
-        layout.addWidget(self.del_btn)
-
-        # Veri depoları (gizli)
-        self.entries = [{s: QLineEdit("0.000") for s in DISP_STAGES}
-                        for _ in range(RUNS_PER_SER)]
+        hl.addWidget(self.vis_check)
+        # İsim
+        self.name_edit=QLineEdit(f"Seri {self.idx}")
+        self.name_edit.setStyleSheet(f"font-weight:bold;font-size:12px;"
+            f"background:transparent;border:none;color:#e0eaf8;min-width:90px;")
+        self.name_edit.setFrame(False)
+        hl.addWidget(self.name_edit,1)
+        # Referans
+        if self.idx==1:
+            self.ref_check=QCheckBox("REF")
+            self.ref_check.setStyleSheet(f"color:{GOLD};font-weight:bold;font-size:11px;")
+            hl.addWidget(self.ref_check)
+        else:
+            self.ref_check=None
+        # Düzenle
+        self.edit_btn=QPushButton("✏")
+        self.edit_btn.setFixedSize(26,26)
+        self.edit_btn.setToolTip("Stage verilerini gir")
+        self.edit_btn.setStyleSheet(f"background:#1a3a6a;border:1px solid #2a5a9a;"
+            f"border-radius:4px;font-size:11px;")
+        self.edit_btn.clicked.connect(self._open_edit)
+        hl.addWidget(self.edit_btn)
+        # Sil
+        self.del_btn=QPushButton("✕")
+        self.del_btn.setFixedSize(26,26)
+        self.del_btn.setStyleSheet(f"background:#3a1a1a;border:1px solid #6a2020;"
+            f"border-radius:4px;font-size:11px;")
+        hl.addWidget(self.del_btn)
 
     def _open_edit(self):
-        """Stage veri giriş popup'ını aç"""
-        dlg = DataEntryDialog(self, self.T, self.color)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            pass  # Veri zaten self.entries'e yazıldı
+        dlg=DataEntryDialog(self, self.T, self.color, self)
+        dlg.exec()
 
-    def get_masses(self, run_idx):
-        m = {"Device": 0.0}
+    def get_masses(self, ri):
+        m={"Device":0.0}
         for s in DISP_STAGES:
-            try: m[s] = float(self.entries[run_idx][s].text().replace(",","."))
-            except: m[s] = 0.0
+            try: m[s]=float(self.entries[ri][s].text().replace(",","."))
+            except: m[s]=0.0
         return m
 
-    def set_masses(self, run_idx, masses):
+    def set_masses(self, ri, masses):
         for s in DISP_STAGES:
-            v = masses.get(s, 0.0)
-            self.entries[run_idx][s].setText(fmt_num(v, 4, "."))
-
-    def _paste(self):
-        cb = QApplication.clipboard()
-        text = cb.text()
-        if not text.strip():
-            QMessageBox.information(self, "", "Pano bos"); return
-        rows = self._parse_paste(text)
-        if not rows:
-            QMessageBox.warning(self, "", "Gecerli veri bulunamadi.\nFormat: 11 sutun (Tab ayracli)"); return
-        all_s = ["Device","Throat","Presep","S1","S2","S3","S4","S5","S6","S7","MOC"]
-        for ri, row_vals in enumerate(rows[:RUNS_PER_SER]):
-            for si, val in enumerate(row_vals[:11]):
-                s = all_s[si]
-                if s in self.entries[ri]:
-                    self.entries[ri][s].setText(f"{val:.4f}")
-
-    def _parse_paste(self, text):
-        import re
-        lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
-        if not lines: return None
-        def split_line(line):
-            if '\t' in line: return [t.strip() for t in line.split('\t')]
-            return [t.strip() for t in re.split(r'\s{2,}|\s+', line.strip())]
-        def is_header(line):
-            parts = split_line(line)
-            first = parts[0] if parts else ''
-            try: float(first.replace(',','.').replace(' ','')); return False
-            except: return True
-        if is_header(lines[0]): lines = lines[1:]
-        if not lines: return None
-        result = []
-        for line in lines:
-            tokens = split_line(line)
-            try:
-                vals = [float(t.replace(',','.').replace(' ','')) for t in tokens if t]
-                if len(vals) >= 11: result.append(vals[:11])
-                elif len(vals) >= 10: result.append([0.0]+vals[:10])
-            except: pass
-        return result if result else None
+            self.entries[ri][s].setText(fmt_num(masses.get(s,0.0),4,"."))
 
     def update_lang(self, T):
-        self.T = T
+        self.T=T
         if self.ref_check:
-            self.ref_check.setText(T["ref_check"])
-        self.edit_btn.setText("✏ " + ("Düzenle" if T.get("dec_sep","") == "," else "Edit"))
+            self.ref_check.setText("REF")
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ANA UYGULAMA
+# HESAPLAMA THREAD
+# ═══════════════════════════════════════════════════════════════════════════════
+class CalcThread(QThread):
+    done=pyqtSignal(list); error=pyqtSignal(str)
+    def __init__(self,series_inputs,flow,lo,hi,delivered_tp):
+        super().__init__()
+        self.si=series_inputs; self.flow=flow
+        self.lo=lo; self.hi=hi; self.dtp=delivered_tp
+    def run(self):
+        try:
+            res=[]
+            for si in self.si:
+                runs=[]
+                for ri,masses in enumerate(si["masses_list"]):
+                    r=calc_run(masses,self.flow,self.lo,self.hi,self.dtp)
+                    r["run_no"]=ri+1; runs.append(r)
+                res.append({"name":si["name"],"color":si["color"],
+                    "runs":runs,"avg":calc_series_avg(runs),"is_ref":si["is_ref"]})
+            self.done.emit(res)
+        except Exception:
+            import traceback; self.error.emit(traceback.format_exc())
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ANA UYGULAMA — Seçenek C (Minimal & Kompakt)
 # ═══════════════════════════════════════════════════════════════════════════════
 class NGIApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.lang = "TR"; self.T = L["TR"]
-        self.all_series = []
-        self.series_panels = []
-        self.flow = 60; self.lo = 15; self.hi = 85
-        self.limit_type = "ema"
-        self.custom_pct = 20.0
-        self.rsd_lim = 5.0
-        self.calc_thread = None
-        self._setup_window()
-        self._build_ui()
-        self._add_series()  # İlk seri
+        self.lang="TR"; self.T=L["TR"]
+        self.all_series=[]; self.series_panels=[]
+        self.flow=60; self.limit_type="ema"
+        self.calc_thread=None
+        self._setup(); self._build_ui()
+        self._add_series()
 
-    def _setup_window(self):
+    def _setup(self):
         self.setWindowTitle(self.T["title"])
-        self.resize(1540, 980)
-        self.setMinimumSize(1200, 780)
+        self.resize(1540,980); self.setMinimumSize(1200,780)
         self.setStyleSheet(STYLE)
-        ico = resource_path("icon.ico")
+        ico=resource_path("icon.ico")
         if os.path.exists(ico):
-            self.setWindowIcon(QIcon(ico))
+            try: self.setWindowIcon(QIcon(ico))
+            except: pass
 
     # ── UI ────────────────────────────────────────────────────────────────────
     def _build_ui(self):
-        central = QWidget(); self.setCentralWidget(central)
-        main_layout = QVBoxLayout(central)
-        main_layout.setSpacing(0); main_layout.setContentsMargins(0,0,0,0)
-
-        # Header
-        hdr = self._build_header()
-        main_layout.addWidget(hdr)
-
-        # Body: splitter
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setHandleWidth(3)
-
-        # Sol panel
-        left_widget = QWidget()
-        left_widget.setMaximumWidth(490)
-        left_widget.setMinimumWidth(380)
-        left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(8,8,4,4)
-        left_layout.setSpacing(6)
-        self._build_left(left_layout)
-        splitter.addWidget(left_widget)
-
-        # Sağ panel
-        right_widget = QWidget()
-        right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(4,4,8,4)
-        right_layout.setSpacing(0)
-        self._build_right(right_layout)
-        splitter.addWidget(right_widget)
-
-        splitter.setSizes([470, 1070])
-        main_layout.addWidget(splitter, 1)
-
-        # Status bar
-        self.status_lbl = QLabel(self.T["status_ready"])
-        self.status_lbl.setStyleSheet(f"color:{TXT2};font-size:10px;"
-            f"background:{BG};padding:3px 10px;border-top:1px solid #1a2a40;")
-        main_layout.addWidget(self.status_lbl)
+        cw=QWidget(); self.setCentralWidget(cw)
+        ml=QVBoxLayout(cw); ml.setSpacing(0); ml.setContentsMargins(0,0,0,0)
+        ml.addWidget(self._build_header())
+        spl=QSplitter(Qt.Orientation.Horizontal); spl.setHandleWidth(2)
+        lw=QWidget(); lw.setFixedWidth(290)
+        ll=QVBoxLayout(lw); ll.setContentsMargins(0,0,0,0); ll.setSpacing(0)
+        self._build_left(ll); spl.addWidget(lw)
+        rw=QWidget(); rl=QVBoxLayout(rw)
+        rl.setContentsMargins(4,4,8,4); rl.setSpacing(0)
+        self._build_right(rl); spl.addWidget(rw)
+        spl.setSizes([290,1250]); ml.addWidget(spl,1)
+        self.status_lbl=QLabel(self.T["status_ready"])
+        self.status_lbl.setStyleSheet(
+            f"color:{TXT2};font-size:11px;background:{BG};"
+            f"padding:3px 10px;border-top:1px solid #1a2a40;")
+        ml.addWidget(self.status_lbl)
 
     def _build_header(self):
-        hdr = QWidget()
-        hdr.setFixedHeight(52)
-        hdr.setStyleSheet(f"background:{NAVY};")
-        hl = QHBoxLayout(hdr)
-        hl.setContentsMargins(14,4,12,4)
-
-        self.lbl_title = QLabel(self.T["title"])
-        self.lbl_title.setStyleSheet(f"color:{GOLD};font-size:15px;font-weight:bold;background:transparent;")
+        h=QWidget(); h.setFixedHeight(44)
+        h.setStyleSheet(f"background:{NAVY};")
+        hl=QHBoxLayout(h); hl.setContentsMargins(12,4,12,4)
+        self.lbl_title=QLabel(self.T["title"])
+        self.lbl_title.setStyleSheet(
+            f"color:{GOLD};font-size:14px;font-weight:bold;background:transparent;")
         hl.addWidget(self.lbl_title)
-
-        self.lbl_sub = QLabel(self.T["subtitle"])
-        self.lbl_sub.setStyleSheet(f"color:#aac8e8;font-size:10px;background:transparent;")
-        hl.addWidget(self.lbl_sub)
-        hl.addStretch()
-
-        self.btn_lang = QPushButton(self.T["lang_btn"])
-        self.btn_lang.setFixedSize(80, 28)
-        self.btn_lang.setStyleSheet(f"background:#001a40;border:1px solid #2a4060;color:{TXT};border-radius:4px;")
+        self.lbl_sub=QLabel(self.T["subtitle"])
+        self.lbl_sub.setStyleSheet(
+            "color:#6a9ec0;font-size:10px;background:transparent;")
+        hl.addWidget(self.lbl_sub); hl.addStretch()
+        self.btn_lang=QPushButton(self.T["lang_btn"])
+        self.btn_lang.setFixedSize(76,26)
+        self.btn_lang.setStyleSheet(
+            "background:#001a40;border:1px solid #2a4060;"
+            "color:#aac8e8;border-radius:3px;font-size:11px;")
         self.btn_lang.clicked.connect(self._toggle_lang)
         hl.addWidget(self.btn_lang)
-        return hdr
+        return h
 
     def _build_left(self, layout):
-        layout.setSpacing(0)
-        layout.setContentsMargins(0,0,0,0)
+        # Seçenek C — Minimal & Kompakt sol panel
+        # Tüm sol panel tek scroll area içinde
+        scroll=QScrollArea(); scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet(f"background:{BG2};border:none;")
+        inner=QWidget(); inner.setStyleSheet(f"background:{BG2};")
+        vl=QVBoxLayout(inner); vl.setSpacing(0); vl.setContentsMargins(0,0,0,0)
 
-        # ── Accordion: Analiz Bilgileri ───────────────────────────────────────
-        self._acc_meta = self._acc_section(layout, "◉  Analiz Bilgileri", True)
-        meta_w = QWidget()
-        meta_w.setStyleSheet(f"background:{BG};")
-        ml = QFormLayout(meta_w)
-        ml.setSpacing(5); ml.setContentsMargins(12,6,12,8)
-        ml.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        self.e_product  = QLineEdit(); ml.addRow(self.T["product"],  self.e_product)
-        self.e_batch    = QLineEdit(); ml.addRow(self.T["batch"],    self.e_batch)
-        self.e_operator = QLineEdit(); ml.addRow(self.T["operator"], self.e_operator)
-        self.e_date = QLineEdit(datetime.datetime.now().strftime("%d.%m.%Y"))
-        ml.addRow(self.T["date"], self.e_date)
-        self._acc_meta["body"].addWidget(meta_w)
+        # ── Analiz Bilgileri ─────────────────────────────────────────────────
+        def sec_title(txt):
+            l=QLabel(txt)
+            l.setStyleSheet(f"color:{TXT2};font-size:10px;font-weight:500;"
+                f"padding:6px 12px 3px;background:{BG2};"
+                f"letter-spacing:0.05em;text-transform:uppercase;")
+            return l
 
-        # ── Accordion: Akış & Parametreler ───────────────────────────────────
-        self._acc_flow = self._acc_section(layout, "⚙  Akis & Parametreler", True)
-        flow_w = QWidget()
-        flow_w.setStyleSheet(f"background:{BG};")
-        fl = QVBoxLayout(flow_w)
-        fl.setSpacing(6); fl.setContentsMargins(12,6,12,10)
+        def divider():
+            d=QFrame(); d.setFrameShape(QFrame.Shape.HLine)
+            d.setStyleSheet("color:#1a2a40;background:#1a2a40;max-height:1px;")
+            return d
 
-        r1 = QHBoxLayout(); r1.setSpacing(6)
-        lf = QLabel(self.T["flow_rate"])
+        vl.addWidget(sec_title("ANALIZ BILGILERI"))
+        vl.addWidget(divider())
+        meta_w=QWidget(); meta_w.setStyleSheet(f"background:{BG};")
+        ml2=QFormLayout(meta_w); ml2.setSpacing(4)
+        ml2.setContentsMargins(10,6,10,8)
+        ml2.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        self.e_product=QLineEdit()
+        self.e_batch=QLineEdit()
+        self.e_operator=QLineEdit()
+        self.e_date=QLineEdit(datetime.datetime.now().strftime("%d.%m.%Y"))
+        for lbl,w in [(self.T["product"],self.e_product),
+                      (self.T["batch"],self.e_batch),
+                      (self.T["operator"],self.e_operator),
+                      (self.T["date"],self.e_date)]:
+            ml2.addRow(lbl, w)
+        vl.addWidget(meta_w)
+
+        # ── Akış & Parametreler ──────────────────────────────────────────────
+        vl.addWidget(sec_title("AKIS & PARAMETRELER"))
+        vl.addWidget(divider())
+        flow_w=QWidget(); flow_w.setStyleSheet(f"background:{BG};")
+        fl=QVBoxLayout(flow_w); fl.setSpacing(5); fl.setContentsMargins(10,6,10,8)
+
+        r1=QHBoxLayout(); r1.setSpacing(6)
+        lf=QLabel(self.T["flow_rate"])
         lf.setStyleSheet(f"color:{GOLD};font-weight:bold;background:transparent;")
         r1.addWidget(lf)
-        self.flow_combo = QComboBox()
-        for fv in sorted(NGI_CUTOFFS.keys()):
-            self.flow_combo.addItem(str(fv))
+        self.flow_combo=QComboBox()
+        for fv in sorted(NGI_CUTOFFS.keys()): self.flow_combo.addItem(str(fv))
         self.flow_combo.setCurrentText("60")
-        self.flow_combo.setFixedWidth(72)
+        self.flow_combo.setFixedWidth(68)
         self.flow_combo.currentTextChanged.connect(self._on_flow)
-        r1.addWidget(self.flow_combo)
-        r1.addWidget(QLabel("L/min"))
-        r1.addStretch()
+        r1.addWidget(self.flow_combo); r1.addWidget(QLabel("L/min")); r1.addStretch()
         fl.addLayout(r1)
 
-        r2 = QHBoxLayout(); r2.setSpacing(4)
+        r2=QHBoxLayout(); r2.setSpacing(4)
         r2.addWidget(QLabel(self.T["valid_range"]))
-        self.e_lo = QLineEdit("15"); self.e_lo.setFixedWidth(48)
-        r2.addWidget(self.e_lo)
-        r2.addWidget(QLabel("–"))
-        self.e_hi = QLineEdit("85"); self.e_hi.setFixedWidth(48)
-        r2.addWidget(self.e_hi)
-        r2.addStretch()
+        self.e_lo=QLineEdit("15"); self.e_lo.setFixedWidth(44)
+        r2.addWidget(self.e_lo); r2.addWidget(QLabel("–"))
+        self.e_hi=QLineEdit("85"); self.e_hi.setFixedWidth(44)
+        r2.addWidget(self.e_hi); r2.addStretch()
         fl.addLayout(r2)
 
-        r3 = QHBoxLayout(); r3.setSpacing(6)
+        r3=QHBoxLayout(); r3.setSpacing(6)
         r3.addWidget(QLabel(self.T["rsd_limit"]))
-        self.e_rsd = QLineEdit("5"); self.e_rsd.setFixedWidth(40)
-        r3.addWidget(self.e_rsd)
-        r3.addWidget(QLabel("%"))
-        self.chk_delivered_tp = QCheckBox(self.T["delivered_tp"])
-        self.chk_delivered_tp.setStyleSheet("font-size:11px;")
-        r3.addWidget(self.chk_delivered_tp)
-        r3.addStretch()
+        self.e_rsd=QLineEdit("5"); self.e_rsd.setFixedWidth(38)
+        r3.addWidget(self.e_rsd); r3.addWidget(QLabel("%"))
+        self.chk_delivered_tp=QCheckBox(self.T["delivered_tp"])
+        self.chk_delivered_tp.setStyleSheet("font-size:10px;")
+        r3.addWidget(self.chk_delivered_tp); r3.addStretch()
         fl.addLayout(r3)
 
-        # Cut-off kutuları
-        co_w = QWidget()
-        co_w.setStyleSheet(f"background:#111827;border-radius:4px;")
-        self.cbox_layout = QHBoxLayout(co_w)
-        self.cbox_layout.setContentsMargins(6,3,6,3); self.cbox_layout.setSpacing(3)
-        self.cbox = co_w
-        fl.addWidget(co_w)
-        self._acc_flow["body"].addWidget(flow_w)
+        # Cut-off küçük kutuları
+        co_w=QWidget(); co_w.setStyleSheet("background:#111827;border-radius:3px;")
+        self.cbox_layout=QHBoxLayout(co_w)
+        self.cbox_layout.setContentsMargins(4,2,4,2); self.cbox_layout.setSpacing(2)
+        self.cbox=co_w; fl.addWidget(co_w)
+        vl.addWidget(flow_w)
         self._refresh_cutoffs()
 
-        # ── Accordion: Seriler ────────────────────────────────────────────────
-        self._acc_ser = self._acc_section(layout, "◈  Seriler (0)", True)
+        # ── Butonlar ─────────────────────────────────────────────────────────
+        vl.addWidget(sec_title("ISLEMLER"))
+        vl.addWidget(divider())
+        btn_w=QWidget(); btn_w.setStyleSheet(f"background:{BG};")
+        bl=QVBoxLayout(btn_w); bl.setSpacing(4); bl.setContentsMargins(10,6,10,8)
 
-        # Buton satır 1
-        bw1 = QWidget(); bw1.setStyleSheet(f"background:{BG};")
-        bl1 = QHBoxLayout(bw1); bl1.setSpacing(4); bl1.setContentsMargins(10,4,10,2)
-        self.btn_add  = QPushButton(self.T["add_series"])
-        self.btn_add.setFixedHeight(30); self.btn_add.clicked.connect(self._add_series)
-        bl1.addWidget(self.btn_add)
-        self.btn_calc = QPushButton(self.T["calculate"])
-        self.btn_calc.setObjectName("btn_calc"); self.btn_calc.setFixedHeight(30)
-        self.btn_calc.clicked.connect(self._calculate); bl1.addWidget(self.btn_calc)
-        self.btn_clr  = QPushButton(self.T["clear"])
-        self.btn_clr.setObjectName("btn_clr"); self.btn_clr.setFixedHeight(30)
-        self.btn_clr.clicked.connect(self._clear); bl1.addWidget(self.btn_clr)
-        self._acc_ser["body"].addWidget(bw1)
+        row1=QHBoxLayout(); row1.setSpacing(4)
+        self.btn_calc=QPushButton(self.T["calculate"])
+        self.btn_calc.setObjectName("btn_calc")
+        self.btn_calc.clicked.connect(self._calculate)
+        row1.addWidget(self.btn_calc)
+        self.btn_clr=QPushButton(self.T["clear"])
+        self.btn_clr.setObjectName("btn_clr")
+        self.btn_clr.clicked.connect(self._clear)
+        self.btn_clr.setFixedWidth(70)
+        row1.addWidget(self.btn_clr)
+        bl.addLayout(row1)
 
-        # Buton satır 2
-        bw2 = QWidget(); bw2.setStyleSheet(f"background:{BG};")
-        bl2 = QHBoxLayout(bw2); bl2.setSpacing(4); bl2.setContentsMargins(10,0,10,4)
-        self.btn_pdf = QPushButton(self.T["export_pdf"])
-        self.btn_pdf.setObjectName("btn_pdf"); self.btn_pdf.setFixedHeight(30)
-        self.btn_pdf.clicked.connect(self._export_pdf); bl2.addWidget(self.btn_pdf)
-        self.btn_csv = QPushButton(self.T["load_csv"])
-        self.btn_csv.setObjectName("btn_csv"); self.btn_csv.setFixedHeight(30)
-        self.btn_csv.clicked.connect(self._load_csv); bl2.addWidget(self.btn_csv)
-        self._acc_ser["body"].addWidget(bw2)
+        row2=QHBoxLayout(); row2.setSpacing(4)
+        self.btn_pdf=QPushButton(self.T["export_pdf"])
+        self.btn_pdf.setObjectName("btn_pdf")
+        self.btn_pdf.clicked.connect(self._export_pdf)
+        row2.addWidget(self.btn_pdf)
+        self.btn_csv=QPushButton(self.T["load_csv"])
+        self.btn_csv.setObjectName("btn_csv")
+        self.btn_csv.clicked.connect(self._load_csv)
+        row2.addWidget(self.btn_csv)
+        bl.addLayout(row2)
+        vl.addWidget(btn_w)
 
-        # Tümünü seç/gizle
-        sw = QWidget(); sw.setStyleSheet(f"background:{BG};")
-        sl = QHBoxLayout(sw); sl.setSpacing(4); sl.setContentsMargins(10,0,10,4)
-        self.btn_sel_all  = QPushButton("Tumunu Sec")
-        self.btn_sel_all.setFixedHeight(24)
+        # ── Seriler ──────────────────────────────────────────────────────────
+        vl.addWidget(sec_title("SERILER"))
+        vl.addWidget(divider())
+
+        sel_w=QWidget(); sel_w.setStyleSheet(f"background:{BG};")
+        sl2=QHBoxLayout(sel_w); sl2.setSpacing(4); sl2.setContentsMargins(10,4,10,4)
+        self.btn_add=QPushButton("+ "+self.T["add_series"])
+        self.btn_add.setFixedHeight(26)
+        self.btn_add.setStyleSheet("font-size:11px;")
+        self.btn_add.clicked.connect(self._add_series)
+        sl2.addWidget(self.btn_add)
+        self.btn_sel_all=QPushButton("Tümü ✓")
+        self.btn_sel_all.setFixedSize(62,26)
         self.btn_sel_all.setStyleSheet("font-size:11px;")
         self.btn_sel_all.clicked.connect(self._select_all_series)
-        sl.addWidget(self.btn_sel_all)
-        self.btn_sel_none = QPushButton("Tumunu Gizle")
-        self.btn_sel_none.setFixedHeight(24)
+        sl2.addWidget(self.btn_sel_all)
+        self.btn_sel_none=QPushButton("Tümü ✕")
+        self.btn_sel_none.setFixedSize(62,26)
         self.btn_sel_none.setStyleSheet("font-size:11px;background:#3a1a1a;")
         self.btn_sel_none.clicked.connect(self._deselect_all_series)
-        sl.addWidget(self.btn_sel_none)
-        sl.addStretch()
-        self._acc_ser["body"].addWidget(sw)
+        sl2.addWidget(self.btn_sel_none)
+        vl.addWidget(sel_w)
 
-        # Seri scroll listesi
-        self.series_scroll = QScrollArea()
-        self.series_scroll.setWidgetResizable(True)
-        self.series_scroll.setMinimumHeight(120)
-        self.series_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.series_scroll.setStyleSheet(f"background:{BG2};border:none;")
-        self.series_container = QWidget()
+        # Seri listesi
+        self.series_container=QWidget()
         self.series_container.setStyleSheet(f"background:{BG2};")
-        self.series_layout = QVBoxLayout(self.series_container)
-        self.series_layout.setSpacing(3)
-        self.series_layout.setContentsMargins(4,4,4,4)
+        self.series_layout=QVBoxLayout(self.series_container)
+        self.series_layout.setSpacing(0); self.series_layout.setContentsMargins(0,0,0,0)
         self.series_layout.addStretch()
-        self.series_scroll.setWidget(self.series_container)
-        self._acc_ser["body"].addWidget(self.series_scroll)
+        vl.addWidget(self.series_container)
+        vl.addStretch()
 
-    def _acc_section(self, parent_layout, title, expanded=True):
-        """Accordion bölümü: başlık butonu + katlanabilir içerik"""
-        outer = QFrame()
-        outer.setStyleSheet(f"""
-            QFrame {{
-                background: {BG2};
-                border-bottom: 1px solid #1a2a40;
-            }}
-        """)
-        vl = QVBoxLayout(outer); vl.setSpacing(0); vl.setContentsMargins(0,0,0,0)
-
-        # Başlık
-        btn = QPushButton(("▾  " if expanded else "▸  ") + title)
-        btn.setCheckable(True); btn.setChecked(expanded)
-        btn.setStyleSheet(f"""
-            QPushButton {{
-                background: {BG3};
-                border: none;
-                border-bottom: 1px solid #1a2a40;
-                text-align: left;
-                padding: 9px 14px;
-                color: #c0d8f0;
-                font-size: 13px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{ background: #1f2d4a; }}
-            QPushButton:checked {{ border-left: 3px solid {GOLD}; color: {GOLD}; background: {NAVY2}; }}
-        """)
-        vl.addWidget(btn)
-
-        # İçerik
-        body_w = QWidget()
-        body_w.setStyleSheet(f"background:{BG};border:none;")
-        body_l = QVBoxLayout(body_w)
-        body_l.setSpacing(0); body_l.setContentsMargins(0,0,0,0)
-        body_w.setVisible(expanded)
-        vl.addWidget(body_w)
-
-        def _toggle(checked, bw=body_w, b=btn, t=title):
-            bw.setVisible(checked)
-            prefix = "▾  " if checked else "▸  "
-            b.setText(prefix + t)
-
-        btn.toggled.connect(_toggle)
-        parent_layout.addWidget(outer)
-        return {"outer": outer, "btn": btn, "body": body_l, "title": title}
-
-    def _update_series_count(self):
-        n = len(self.series_panels)
-        lbl = "Seriler" if self.lang=="TR" else "Series"
-        new_title = f"{lbl} ({n})"
-        try:
-            self._acc_ser["title"] = new_title
-            prefix = "▾  " if self._acc_ser["btn"].isChecked() else "▸  "
-            self._acc_ser["btn"].setText(prefix + new_title)
-        except: pass
-
+        scroll.setWidget(inner); layout.addWidget(scroll)
 
     def _build_right(self, layout):
-        self.tabs = QTabWidget()
+        self.tabs=QTabWidget()
         self.tabs.setDocumentMode(True)
         self.tabs.currentChanged.connect(self._on_tab_change)
-        layout.addWidget(self.tabs, 1)
+        layout.addWidget(self.tabs,1)
 
-        # Sonuçlar sekmesi
-        self.tab_results = QScrollArea()
-        self.tab_results.setWidgetResizable(True)
-        self.results_widget = QWidget()
-        self.results_layout = QVBoxLayout(self.results_widget)
+        # Sonuçlar
+        self.tab_results=QScrollArea(); self.tab_results.setWidgetResizable(True)
+        self.results_widget=QWidget()
+        self.results_layout=QVBoxLayout(self.results_widget)
         self.results_layout.setSpacing(6); self.results_layout.setContentsMargins(8,8,8,8)
         self.results_layout.addStretch()
         self.tab_results.setWidget(self.results_widget)
         self.tabs.addTab(self.tab_results, self.T["tab_results"])
 
-        # Log-Probit sekmesi
-        self.tab_lp = QWidget()
-        lp_layout = QVBoxLayout(self.tab_lp)
-        lp_layout.setContentsMargins(4,4,4,4); lp_layout.setSpacing(4)
-        # Kontrol
-        lp_ctrl = QHBoxLayout()
-        self.chk_lp_avg = QCheckBox(self.T["lp_avg_only"])
-        self.chk_lp_avg.stateChanged.connect(lambda: self._plot_lp() if self.all_series else None)
+        # Log-Probit
+        self.tab_lp=QWidget()
+        lpl=QVBoxLayout(self.tab_lp); lpl.setContentsMargins(4,4,4,4); lpl.setSpacing(4)
+        lp_ctrl=QHBoxLayout()
+        self.chk_lp_avg=QCheckBox(self.T["lp_avg_only"])
+        self.chk_lp_avg.stateChanged.connect(
+            lambda: self._plot_lp() if self.all_series else None)
         lp_ctrl.addWidget(self.chk_lp_avg); lp_ctrl.addStretch()
-        lp_layout.addLayout(lp_ctrl)
-        self.lp_canvas = FigureCanvas(Figure(figsize=(9,5.2), facecolor=BG))
-        lp_layout.addWidget(self.lp_canvas, 1)
+        lpl.addLayout(lp_ctrl)
+        self.lp_canvas=FigureCanvas(Figure(figsize=(9,5), facecolor=BG))
+        lpl.addWidget(self.lp_canvas,1)
         self.tabs.addTab(self.tab_lp, self.T["tab_plot"])
 
-        # Dağılım sekmesi
-        self.tab_dist = QWidget()
-        dist_layout = QVBoxLayout(self.tab_dist)
-        dist_layout.setContentsMargins(4,4,4,4); dist_layout.setSpacing(4)
-        # Limit paneli
-        lim_panel = QFrame(); lim_panel.setFixedHeight(38)
+        # Dağılım
+        self.tab_dist=QWidget()
+        dl=QVBoxLayout(self.tab_dist); dl.setContentsMargins(4,4,4,4); dl.setSpacing(4)
+        lim_panel=QFrame(); lim_panel.setFixedHeight(36)
         lim_panel.setStyleSheet(f"background:{BG3};border-radius:4px;border:1px solid #2a4060;")
-        lim_hl = QHBoxLayout(lim_panel); lim_hl.setSpacing(8); lim_hl.setContentsMargins(8,2,8,2)
-        lim_hl.addWidget(QLabel(self.T["limit_label"]))
-        self.lim_grp = QButtonGroup(self)
-        for val, txt in [("ema",self.T["lim_ema"]),("fda",self.T["lim_fda"]),
-                          ("usp",self.T["lim_usp"]),("custom",self.T["lim_custom"])]:
-            rb = QRadioButton(txt); rb.setProperty("lim_val", val)
+        limhl=QHBoxLayout(lim_panel); limhl.setSpacing(8); limhl.setContentsMargins(8,2,8,2)
+        limhl.addWidget(QLabel(self.T["limit_label"]))
+        self.lim_grp=QButtonGroup(self)
+        for val,txt in [("ema",self.T["lim_ema"]),("fda",self.T["lim_fda"]),
+                         ("usp",self.T["lim_usp"]),("custom",self.T["lim_custom"])]:
+            rb=QRadioButton(txt); rb.setProperty("lim_val",val)
             self.lim_grp.addButton(rb)
-            if val == "ema": rb.setChecked(True)
-            rb.toggled.connect(lambda c, v=val: (setattr(self,'limit_type',v) or self._plot_dist()) if c and self.all_series else None)
-            lim_hl.addWidget(rb)
-        lim_hl.addWidget(QLabel(self.T["lim_pct"]))
-        self.e_lim_pct = QLineEdit("20"); self.e_lim_pct.setFixedWidth(44)
-        self.e_lim_pct.editingFinished.connect(lambda: self._plot_dist() if self.all_series else None)
-        lim_hl.addWidget(self.e_lim_pct); lim_hl.addStretch()
-        dist_layout.addWidget(lim_panel)
-        # Grafik + uyarılar scroll area içinde
-        self.dist_canvas = FigureCanvas(Figure(figsize=(9,5.0), facecolor=BG))
-        dist_layout.addWidget(self.dist_canvas, 1)
-        # Uyarı scroll area
-        self.warn_scroll = QScrollArea()
-        self.warn_scroll.setWidgetResizable(True)
-        self.warn_scroll.setMaximumHeight(180)
-        self.warn_scroll.setVisible(False)
+            if val=="ema": rb.setChecked(True)
+            rb.toggled.connect(lambda c,v=val:
+                (setattr(self,'limit_type',v) or self._plot_dist())
+                if c and self.all_series else None)
+            limhl.addWidget(rb)
+        limhl.addWidget(QLabel(self.T["lim_pct"]))
+        self.e_lim_pct=QLineEdit("20"); self.e_lim_pct.setFixedWidth(44)
+        self.e_lim_pct.editingFinished.connect(
+            lambda: self._plot_dist() if self.all_series else None)
+        limhl.addWidget(self.e_lim_pct); limhl.addStretch()
+        dl.addWidget(lim_panel)
+        self.dist_canvas=FigureCanvas(Figure(figsize=(9,5), facecolor=BG))
+        dl.addWidget(self.dist_canvas,1)
+        # Uyarı scroll
+        self.warn_scroll=QScrollArea(); self.warn_scroll.setWidgetResizable(True)
+        self.warn_scroll.setMaximumHeight(160); self.warn_scroll.setVisible(False)
         self.warn_scroll.setStyleSheet("background:#1a0a0a;border:none;")
-        self.warn_container = QWidget()
-        self.warn_container.setStyleSheet("background:#1a0a0a;")
-        self.warn_layout = QVBoxLayout(self.warn_container)
+        self.warn_container=QWidget(); self.warn_container.setStyleSheet("background:#1a0a0a;")
+        self.warn_layout=QVBoxLayout(self.warn_container)
         self.warn_layout.setContentsMargins(6,4,6,4); self.warn_layout.setSpacing(3)
         self.warn_scroll.setWidget(self.warn_container)
-        dist_layout.addWidget(self.warn_scroll)
+        dl.addWidget(self.warn_scroll)
         self.tabs.addTab(self.tab_dist, self.T["tab_dist"])
 
-        # Özet sekmesi
-        self.tab_summary = QScrollArea()
-        self.tab_summary.setWidgetResizable(True)
-        self.summary_widget = QWidget()
-        self.summary_layout = QVBoxLayout(self.summary_widget)
+        # Özet
+        self.tab_summary=QScrollArea(); self.tab_summary.setWidgetResizable(True)
+        self.summary_widget=QWidget()
+        self.summary_layout=QVBoxLayout(self.summary_widget)
         self.summary_layout.setSpacing(6); self.summary_layout.setContentsMargins(8,8,8,8)
         self.summary_layout.addStretch()
         self.tab_summary.setWidget(self.summary_widget)
         self.tabs.addTab(self.tab_summary, self.T["tab_summary"])
 
-        # Karşılaştırma sekmesi
-        self.tab_compare = QScrollArea()
-        self.tab_compare.setWidgetResizable(True)
-        self.compare_widget = QWidget()
-        self.compare_layout = QVBoxLayout(self.compare_widget)
+        # Karşılaştırma
+        self.tab_compare=QScrollArea(); self.tab_compare.setWidgetResizable(True)
+        self.compare_widget=QWidget()
+        self.compare_layout=QVBoxLayout(self.compare_widget)
         self.compare_layout.setSpacing(6); self.compare_layout.setContentsMargins(8,8,8,8)
         self.compare_layout.addStretch()
         self.tab_compare.setWidget(self.compare_widget)
@@ -1152,52 +1014,59 @@ class NGIApp(QMainWindow):
     # ── Yardımcı ──────────────────────────────────────────────────────────────
     def _refresh_cutoffs(self):
         for i in reversed(range(self.cbox_layout.count())):
-            w = self.cbox_layout.itemAt(i).widget()
-            if w: w.deleteLater()
-        flow = int(self.flow_combo.currentText())
-        co = NGI_CUTOFFS[flow]
-        lbl = QLabel(f"{self.T['cutoff_title']} [{flow} L/min]:")
-        lbl.setStyleSheet(f"color:{GOLD};font-weight:bold;font-size:10px;background:transparent;border:none;")
+            w=self.cbox_layout.itemAt(i).widget()
+            if w: w.setParent(None)
+        flow=int(self.flow_combo.currentText()); co=NGI_CUTOFFS[flow]
+        lbl=QLabel(f"{flow}L:")
+        lbl.setStyleSheet(f"color:{GOLD};font-size:9px;font-weight:bold;"
+            "background:transparent;border:none;")
         self.cbox_layout.addWidget(lbl)
         for s in ["S1","S2","S3","S4","S5","S6","S7","MOC"]:
-            if co.get(s,999) < 900:
-                box = QFrame()
-                box.setStyleSheet(f"background:#1a2540;border-radius:3px;border:1px solid #2a4060;")
-                bl = QVBoxLayout(box); bl.setContentsMargins(4,1,4,1); bl.setSpacing(0)
-                sl = QLabel(s); sl.setStyleSheet(f"color:#7ab0d0;font-size:9px;font-weight:bold;background:transparent;border:none;")
-                sl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                vl = QLabel(f"{co[s]:.2f}"); vl.setStyleSheet(f"color:#e0f0ff;font-size:9px;background:transparent;border:none;")
-                vl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                bl.addWidget(sl); bl.addWidget(vl)
-                self.cbox_layout.addWidget(box)
+            if co.get(s,999)<900:
+                b=QFrame()
+                b.setStyleSheet("background:#1a2540;border-radius:2px;"
+                    "border:0.5px solid #2a4060;")
+                bl=QVBoxLayout(b); bl.setContentsMargins(3,1,3,1); bl.setSpacing(0)
+                sl2=QLabel(s); sl2.setStyleSheet(
+                    "color:#7ab0d0;font-size:8px;font-weight:bold;"
+                    "background:transparent;border:none;")
+                sl2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                vl2=QLabel(f"{co[s]:.2f}"); vl2.setStyleSheet(
+                    "color:#e0f0ff;font-size:8px;background:transparent;border:none;")
+                vl2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                bl.addWidget(sl2); bl.addWidget(vl2)
+                self.cbox_layout.addWidget(b)
         self.cbox_layout.addStretch()
 
     def _on_flow(self, v):
-        self.flow = int(v); self._refresh_cutoffs()
+        self.flow=int(v); self._refresh_cutoffs()
 
     def _add_series(self):
-        idx = len(self.series_panels) + 1
-        color = CP[(idx-1) % len(CP)]
-        panel = SeriesPanel(idx, color, self.T, self.series_container)
-        panel.del_btn.clicked.connect(lambda: self._del_specific(panel))
-        panel.vis_check.stateChanged.connect(lambda: self._replot_if_done())
-        count = self.series_layout.count()
-        self.series_layout.insertWidget(count-1, panel)
-        self.series_panels.append(panel)
-        self._update_series_count()
+        idx=len(self.series_panels)+1
+        color=CP[(idx-1)%len(CP)]
+        p=SeriesPanel(idx, color, self.T, self.series_container)
+        p.del_btn.clicked.connect(lambda: self._del_specific(p))
+        p.vis_check.stateChanged.connect(lambda: self._replot_if_done())
+        cnt=self.series_layout.count()
+        self.series_layout.insertWidget(cnt-1, p)
+        self.series_panels.append(p)
 
-    def _del_specific(self, panel):
-        if len(self.series_panels) <= 1: return
-        self.series_panels.remove(panel)
-        panel.deleteLater()
-        self._update_series_count()
+    def _del_series(self):
+        if len(self.series_panels)<=1: return
+        p=self.series_panels.pop()
+        p.setParent(None)
+
+    def _del_specific(self, p):
+        if len(self.series_panels)<=1: return
+        self.series_panels.remove(p)
+        p.setParent(None)
 
     def _replot_if_done(self):
         if not self.all_series: return
-        cur = self.tabs.currentIndex()
-        if cur == 1: self._plot_lp()
-        elif cur == 2: self._plot_dist()
-        elif cur == 4: self._show_compare()
+        cur=self.tabs.currentIndex()
+        if cur==1: self._plot_lp()
+        elif cur==2: self._plot_dist()
+        elif cur==4: self._show_compare()
 
     def _select_all_series(self):
         for p in self.series_panels: p.vis_check.setChecked(True)
@@ -1206,17 +1075,8 @@ class NGIApp(QMainWindow):
         for p in self.series_panels: p.vis_check.setChecked(False)
 
     def _visible_series(self):
-        """Sadece visible işaretli serileri döndür"""
-        return [sd for sd, p in zip(self.all_series, self.series_panels)
+        return [sd for sd,p in zip(self.all_series, self.series_panels)
                 if p.vis_check.isChecked()]
-
-    def _del_series(self):
-        if len(self.series_panels) <= 1: return
-        panel = self.series_panels.pop()
-        panel.deleteLater()
-        # İndeks numaralarını güncelle
-        for i, p in enumerate(self.series_panels):
-            p.lbl_num_idx = i+1
 
     def _clear(self):
         for p in self.series_panels:
@@ -1224,394 +1084,349 @@ class NGIApp(QMainWindow):
                 for s in DISP_STAGES:
                     p.entries[ri][s].setText("0.000")
             if p.ref_check: p.ref_check.setChecked(False)
-        self.all_series = []
+        self.all_series=[]
         self._clear_results()
 
     def _clear_results(self):
-        # Sonuçlar
-        for i in reversed(range(self.results_layout.count()-1)):
-            w = self.results_layout.itemAt(i).widget()
-            if w: w.deleteLater()
-        # Grafikler
+        for lay in [self.results_layout, self.summary_layout, self.compare_layout]:
+            for i in reversed(range(lay.count()-1)):
+                w=lay.itemAt(i).widget()
+                if w: w.setParent(None)
         for canvas in [self.lp_canvas, self.dist_canvas]:
-            fig = canvas.figure; fig.clear()
-            canvas.draw()
-        # Özet
-        for i in reversed(range(self.summary_layout.count()-1)):
-            w = self.summary_layout.itemAt(i).widget()
-            if w: w.deleteLater()
-        # Karşılaştırma
-        for i in reversed(range(self.compare_layout.count()-1)):
-            w = self.compare_layout.itemAt(i).widget()
-            if w: w.deleteLater()
-        # Uyarılar
-        self.warn_frame.setVisible(False)
+            canvas.figure.clear(); canvas.draw()
+        for i in reversed(range(self.warn_layout.count())):
+            w=self.warn_layout.itemAt(i).widget()
+            if w: w.setParent(None)
+        self.warn_scroll.setVisible(False)
 
     def _get_flow_lo_hi(self):
-        flow = int(self.flow_combo.currentText())
-        try: lo = float(self.e_lo.text())
-        except: lo = 15
-        try: hi = float(self.e_hi.text())
-        except: hi = 85
-        return flow, lo, hi
+        flow=int(self.flow_combo.currentText())
+        try: lo=float(self.e_lo.text())
+        except: lo=15
+        try: hi=float(self.e_hi.text())
+        except: hi=85
+        return flow,lo,hi
 
-    # ── Hesaplama (thread) ────────────────────────────────────────────────────
+    # ── Hesaplama ─────────────────────────────────────────────────────────────
     def _calculate(self):
-        flow, lo, hi = self._get_flow_lo_hi()
-        delivered_tp = self.chk_delivered_tp.isChecked()
-        series_inputs = []
-        for p in self.series_panels:
-            masses_list = [p.get_masses(ri) for ri in range(RUNS_PER_SER)]
-            is_ref = (p.ref_check.isChecked() if p.ref_check else False) and (p == self.series_panels[0])
-            series_inputs.append({
-                "name": p.name_edit.text(),
-                "color": p.color,
-                "masses_list": masses_list,
-                "is_ref": is_ref,
-            })
+        flow,lo,hi=self._get_flow_lo_hi()
+        si=[{"name":p.name_edit.text(),"color":p.color,
+             "masses_list":[p.get_masses(ri) for ri in range(RUNS_PER_SER)],
+             "is_ref":(p.ref_check.isChecked() if p.ref_check else False)
+                       and p==self.series_panels[0]}
+            for p in self.series_panels]
         self.status_lbl.setText(self.T["status_calc"])
         self.btn_calc.setEnabled(False)
-        self.calc_thread = CalcThread(series_inputs, flow, lo, hi, delivered_tp)
+        self.calc_thread=CalcThread(si,flow,lo,hi,self.chk_delivered_tp.isChecked())
         self.calc_thread.done.connect(self._on_calc_done)
         self.calc_thread.error.connect(self._on_calc_error)
         self.calc_thread.start()
 
     def _on_calc_done(self, results):
-        self.all_series = results
-        self.btn_calc.setEnabled(True)
+        self.all_series=results; self.btn_calc.setEnabled(True)
         self._clear_results()
-        cur_tab = self.tabs.currentIndex()
-        # Aktif sekmeyi render et
-        if cur_tab == 0:   self._show_results()
-        elif cur_tab == 1: self._plot_lp()
-        elif cur_tab == 2: self._plot_dist()
-        elif cur_tab == 3: self._show_summary()
-        elif cur_tab == 4: self._show_compare()
-        # Sonuçlar sekmesi her zaman render (eğer aktif değilse de)
-        if cur_tab != 0: self._show_results()
+        cur=self.tabs.currentIndex()
+        if cur==0: self._show_results()
+        elif cur==1: self._plot_lp()
+        elif cur==2: self._plot_dist()
+        elif cur==3: self._show_summary()
+        elif cur==4: self._show_compare()
+        if cur!=0: self._show_results()
         self.status_lbl.setText(self.T["status_done"])
 
     def _on_calc_error(self, msg):
         self.btn_calc.setEnabled(True)
-        QMessageBox.critical(self, "Hesaplama Hatasi", msg[:500])
-        self.status_lbl.setText("Hata!")
+        QMessageBox.critical(self,"Hesaplama Hatasi",msg[:500])
 
     def _on_tab_change(self, idx):
         if not self.all_series: return
-        if idx == 1:   self._plot_lp()
-        elif idx == 2: self._plot_dist()
-        elif idx == 3: self._show_summary()
-        elif idx == 4: self._show_compare()
+        if idx==1: self._plot_lp()
+        elif idx==2: self._plot_dist()
+        elif idx==3: self._show_summary()
+        elif idx==4: self._show_compare()
 
-    # ── Sonuçlar sekmesi ──────────────────────────────────────────────────────
+    # ── Sonuçlar ──────────────────────────────────────────────────────────────
     def _show_results(self):
         for i in reversed(range(self.results_layout.count()-1)):
-            w = self.results_layout.itemAt(i).widget()
-            if w: w.deleteLater()
-        T = self.T; ds = T["dec_sep"]
-        compact = len(self.all_series) >= 5
-        co = NGI_CUTOFFS[int(self.flow_combo.currentText())]
-
+            w=self.results_layout.itemAt(i).widget()
+            if w: w.setParent(None)
+        T=self.T; ds=T["dec_sep"]
+        co=NGI_CUTOFFS[int(self.flow_combo.currentText())]
+        compact=len(self.all_series)>=5
         for sd in self.all_series:
-            ref_tag = f"  [{T['ref_label']}]" if sd["is_ref"] else ""
-            sh = QLabel(f"▌ {sd['name']}{ref_tag}")
-            sh.setStyleSheet(f"color:{sd['color']};font-size:13px;font-weight:bold;"
+            rt=f"  [{T['ref_label']}]" if sd["is_ref"] else ""
+            sh=QLabel(f"▌ {sd['name']}{rt}")
+            sh.setStyleSheet(f"color:{sd['color']};font-size:14px;font-weight:bold;"
                 f"background:{BG2};border-left:3px solid {sd['color']};padding:4px 8px;")
-            self.results_layout.insertWidget(self.results_layout.count()-1, sh)
-
+            self.results_layout.insertWidget(self.results_layout.count()-1,sh)
             for run in sd["runs"]:
-                rh = QLabel(f"    Run {run['run_no']}")
-                rh.setStyleSheet(f"color:#aac8e8;font-weight:bold;padding:2px 12px;"
-                    f"background:transparent;")
-                self.results_layout.insertWidget(self.results_layout.count()-1, rh)
-
+                rh=QLabel(f"    Run {run['run_no']}")
+                rh.setStyleSheet("color:#aac8e8;font-weight:bold;padding:2px 12px;"
+                    "background:transparent;")
+                self.results_layout.insertWidget(self.results_layout.count()-1,rh)
                 if "error" in run:
-                    el = QLabel(f"      {T['insufficient']} (n={run.get('n',0)})")
+                    el=QLabel(f"      {T['insufficient']} (n={run.get('n',0)})")
                     el.setStyleSheet("color:#ff6060;padding:2px 20px;background:transparent;")
-                    self.results_layout.insertWidget(self.results_layout.count()-1, el)
+                    self.results_layout.insertWidget(self.results_layout.count()-1,el)
                     continue
-
-                # Parametre satırı (her zaman göster)
-                pf = QFrame(); pf.setStyleSheet(f"background:#1a2540;border-radius:4px;border:1px solid #2a4060;")
-                pfl = QHBoxLayout(pf); pfl.setContentsMargins(8,4,8,4); pfl.setSpacing(8)
-                params = [
-                    (T["metered"],    fmt_num(run["metered"],4,ds)),
-                    (T["delivered"],  fmt_num(run["delivered"],4,ds)),
-                    (T["fp_dose"],    fmt_num(run["fpd"],4,ds)),
-                    (T["fp_frac"],    fmt_num(run["fpf"],3,ds)),
-                    ("MMAD",          fmt_num(run["mmad"],4,ds)),
-                    ("GSD",           fmt_num(run["gsd"],4,ds)),
-                    (T["slope_lbl"],  fmt_num(run["slope"],4,ds)),
-                    (T["int_lbl"],    fmt_num(run["intercept"],4,ds)),
-                    (T["r2_lbl"],     fmt_num(run["r2"],4,ds)),
-                    (T["n_lbl"],      str(run["n"])),
+                pf=QFrame(); pf.setStyleSheet(
+                    f"background:#1a2540;border-radius:4px;border:1px solid #2a4060;")
+                pfl=QHBoxLayout(pf); pfl.setContentsMargins(8,5,8,5); pfl.setSpacing(10)
+                params=[
+                    (T["metered"],fmt_num(run["metered"],4,ds)),
+                    (T["delivered"],fmt_num(run["delivered"],4,ds)),
+                    (T["fp_dose"],fmt_num(run["fpd"],4,ds)),
+                    (T["fp_frac"],fmt_num(run["fpf"],3,ds)),
+                    ("MMAD",fmt_num(run["mmad"],4,ds)),
+                    ("GSD",fmt_num(run["gsd"],4,ds)),
+                    (T["slope_lbl"],fmt_num(run["slope"],4,ds)),
+                    (T["int_lbl"],fmt_num(run["intercept"],4,ds)),
+                    (T["r2_lbl"],fmt_num(run["r2"],4,ds)),
+                    (T["n_lbl"],str(run["n"])),
                 ]
-                for lbl, val in params:
-                    is_key = lbl in (T["fp_dose"],T["fp_frac"],"MMAD","GSD")
-                    l1 = QLabel(lbl)
-                    l1.setStyleSheet(f"color:{TXT2};font-size:12px;background:transparent;")
-                    l2 = QLabel(val)
-                    l2.setStyleSheet(f"color:{'#FFC600' if is_key else '#e0f0ff'};"
-                        f"font-weight:{'bold' if is_key else 'normal'};"
-                        f"font-size:{'12px' if is_key else '11px'};background:transparent;")
+                for lbl,val in params:
+                    ik=lbl in(T["fp_dose"],T["fp_frac"],"MMAD","GSD")
+                    l1=QLabel(lbl)
+                    l1.setStyleSheet("color:#5a8ab0;font-size:11px;background:transparent;")
+                    l2=QLabel(val)
+                    l2.setStyleSheet(
+                        f"color:{'#FFC600' if ik else '#e0f0ff'};"
+                        f"font-weight:{'bold' if ik else 'normal'};"
+                        f"font-size:{'13px' if ik else '12px'};background:transparent;")
                     pfl.addWidget(l1); pfl.addWidget(l2)
                 pfl.addStretch()
-                self.results_layout.insertWidget(self.results_layout.count()-1, pf)
-
-                # Kümülatif tablo (compact modda gizli)
+                self.results_layout.insertWidget(self.results_layout.count()-1,pf)
                 if not compact:
-                    self._add_cum_table(run, co, ds)
+                    self._add_cum_table(run,co,ds)
 
     def _add_cum_table(self, run, co, ds):
-        T = self.T
-        tf = QFrame(); tf.setStyleSheet(f"background:#111827;border-radius:4px;border:1px solid #1a2a40;")
-        tfl = QVBoxLayout(tf); tfl.setContentsMargins(4,4,4,4); tfl.setSpacing(1)
-        hdrs = [T["stage"],"D50",T["mass_mg"],T["cum_mass"],T["cum_pct"],T["valid_pt"],T["probit_z"]]
-        widths = [56,60,72,76,64,46,76]
-        # Başlık
-        hr = QHBoxLayout(); hr.setSpacing(0)
-        hframe = QFrame(); hframe.setStyleSheet("background:#1F4E79;border-radius:2px;")
-        hfl = QHBoxLayout(hframe); hfl.setContentsMargins(2,2,2,2); hfl.setSpacing(0)
-        for h,w in zip(hdrs,widths):
-            l = QLabel(h); l.setFixedWidth(w)
-            l.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            l.setStyleSheet("color:white;font-weight:bold;font-size:12px;background:transparent;")
+        T=self.T
+        tf=QFrame()
+        tf.setStyleSheet("background:#111827;border-radius:4px;border:1px solid #1a2a40;")
+        tfl=QVBoxLayout(tf); tfl.setContentsMargins(3,3,3,3); tfl.setSpacing(1)
+        hdrs=[T["stage"],"D50",T["mass_mg"],T["cum_mass"],T["cum_pct"],T["valid_pt"],T["probit_z"]]
+        ws=[56,60,72,76,64,46,76]
+        hf=QFrame(); hf.setStyleSheet("background:#1F4E79;border-radius:2px;")
+        hfl=QHBoxLayout(hf); hfl.setContentsMargins(2,2,2,2); hfl.setSpacing(0)
+        for h,w in zip(hdrs,ws):
+            l=QLabel(h); l.setFixedWidth(w); l.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            l.setStyleSheet("color:white;font-weight:bold;font-size:11px;background:transparent;")
             hfl.addWidget(l)
-        hfl.addStretch()
-        tfl.addWidget(hframe)
-        # Veri
-        valid_st = {v["stage"] for v in run["valid"]}
-        cum_m = 0.0
-        for i, row in enumerate(run["cum_data"]):
-            s = row["stage"]
+        hfl.addStretch(); tfl.addWidget(hf)
+        valid_st={v["stage"] for v in run["valid"]}; cum_m=0.0
+        for i2,row in enumerate(run["cum_data"]):
+            s=row["stage"]
             if s not in (["Throat"]+[x for x in ALL_KEYS if co.get(x,999)<900]): continue
-            cum_m += row["mass"]
-            iv = s in valid_st
-            pz = ""
-            if 0 < row["u_pct"] < 100:
-                try: pz = fmt_num(norm.ppf(row["u_pct"]/100),4,ds)
+            cum_m+=row["mass"]; iv=s in valid_st
+            pz=""
+            if 0<row["u_pct"]<100:
+                try: pz=fmt_num(norm.ppf(row["u_pct"]/100),4,ds)
                 except: pass
-            d50_str = fmt_num(row["d50"],3,ds) if row["d50"]<900 else "---"
-            bg = "#1a3a1a" if iv else ("#111827" if i%2==0 else "#0e1219")
-            dr = QFrame(); dr.setStyleSheet(f"background:{bg};")
-            dfl = QHBoxLayout(dr); dfl.setContentsMargins(2,1,2,1); dfl.setSpacing(0)
-            vals = [s, d50_str, fmt_num(row["mass"],4,ds), fmt_num(cum_m,4,ds),
-                    fmt_num(row["u_pct"],3,ds), "✓" if iv else "", pz]
-            for val,w in zip(vals,widths):
-                l = QLabel(val); l.setFixedWidth(w)
+            d50_str=fmt_num(row["d50"],3,ds) if row["d50"]<900 else "---"
+            bg="#1a3a1a" if iv else("#111827" if i2%2==0 else "#0e1219")
+            dr=QFrame(); dr.setStyleSheet(f"background:{bg};")
+            dfl=QHBoxLayout(dr); dfl.setContentsMargins(2,1,2,1); dfl.setSpacing(0)
+            for val,w in zip([s,d50_str,fmt_num(row["mass"],4,ds),
+                              fmt_num(cum_m,4,ds),fmt_num(row["u_pct"],3,ds),
+                              "✓" if iv else "",pz],ws):
+                l=QLabel(val); l.setFixedWidth(w)
                 l.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                l.setStyleSheet(f"color:{'#90ee90' if iv else '#c0d0e0'};"
+                l.setStyleSheet(
+                    f"color:{'#90ee90' if iv else '#c0d0e0'};"
                     f"font-weight:{'bold' if iv else 'normal'};"
-                    f"font-size:10px;background:transparent;")
+                    "font-size:11px;background:transparent;")
                 dfl.addWidget(l)
-            dfl.addStretch()
-            tfl.addWidget(dr)
-        self.results_layout.insertWidget(self.results_layout.count()-1, tf)
+            dfl.addStretch(); tfl.addWidget(dr)
+        self.results_layout.insertWidget(self.results_layout.count()-1,tf)
 
     # ── Log-Probit ────────────────────────────────────────────────────────────
     def _plot_lp(self):
         plt.close("all")
-        fig = self.lp_canvas.figure; fig.clear()
-        fig.patch.set_facecolor(BG)
-        ax = fig.add_subplot(111); ax.set_facecolor("#0e1525")
-        flow = int(self.flow_combo.currentText())
-        avg_only = self.chk_lp_avg.isChecked() or len(self.all_series) >= 4
-        if avg_only != self.chk_lp_avg.isChecked():
-            self.chk_lp_avg.blockSignals(True)
-            self.chk_lp_avg.setChecked(True)
+        fig=self.lp_canvas.figure; fig.clear(); fig.patch.set_facecolor(BG)
+        ax=fig.add_subplot(111); ax.set_facecolor("#0e1525")
+        flow=int(self.flow_combo.currentText())
+        avg_only=self.chk_lp_avg.isChecked() or len(self.all_series)>=4
+        if avg_only and not self.chk_lp_avg.isChecked():
+            self.chk_lp_avg.blockSignals(True); self.chk_lp_avg.setChecked(True)
             self.chk_lp_avg.blockSignals(False)
-
-        notes = []
+        notes=[]
         for sd in self._visible_series():
-            col = sd["color"]
-            valid_runs = [r for r in sd["runs"] if "error" not in r]
-            if not valid_runs: continue
-            lw = 2.5 if sd["is_ref"] else 1.5
-
+            col=sd["color"]
+            vr=[r for r in sd["runs"] if "error" not in r]
+            if not vr: continue
+            lw=2.5 if sd["is_ref"] else 1.5
             if avg_only:
-                min_len = min(len(r["x_reg"]) for r in valid_runs)
-                avg_x = sum(r["x_reg"][:min_len] for r in valid_runs)/len(valid_runs)
-                avg_y = sum(r["y_reg"][:min_len] for r in valid_runs)/len(valid_runs)
-                b_avg = sum(r["b"] for r in valid_runs)/len(valid_runs)
-                a_avg = sum(r["a"] for r in valid_runs)/len(valid_runs)
-                ax.plot(avg_x, avg_y, "o", color=col, ms=6, zorder=4)
-                xr = np.linspace(min(avg_x)-0.15, max(avg_x)+0.15, 60)
-                ax.plot(xr, a_avg+b_avg*xr, "-", color=col, lw=lw,
-                    label=sd["name"])
+                ml=min(len(r["x_reg"]) for r in vr)
+                ax_=sum(r["x_reg"][:ml] for r in vr)/len(vr)
+                ay_=sum(r["y_reg"][:ml] for r in vr)/len(vr)
+                ba=sum(r["b"] for r in vr)/len(vr)
+                aa=sum(r["a"] for r in vr)/len(vr)
+                ax.plot(ax_,ay_,"o",color=col,ms=6,zorder=4)
+                xr=np.linspace(min(ax_)-0.15,max(ax_)+0.15,60)
+                ax.plot(xr,aa+ba*xr,"-",color=col,lw=lw,label=sd["name"])
                 if sd["avg"] and "mmad" in sd["avg"]["params"]:
-                    mv = sd["avg"]["params"]["mmad"][0]
-                    if mv > 0:
-                        ax.axvline(math.log10(mv), color=col, lw=0.8, ls=":", alpha=0.7)
+                    mv=sd["avg"]["params"]["mmad"][0]
+                    if mv>0:
+                        ax.axvline(math.log10(mv),color=col,lw=0.8,ls=":",alpha=0.7)
+                        ax.text(math.log10(mv)+0.02,-2.5+list(self._visible_series()).index(sd)*0.35,
+                            f"MMAD={fmt_num(mv,2,self.T['dec_sep'])}",
+                            fontsize=8,color=col,va="bottom")
             else:
-                for run in valid_runs:
-                    ax.plot(run["x_reg"], run["y_reg"], "o", color=col, ms=4, zorder=4, alpha=0.7)
-                    xr = np.linspace(min(run["x_reg"])-0.1, max(run["x_reg"])+0.1, 50)
-                    ax.plot(xr, run["a"]+run["b"]*xr, "-", color=col, lw=lw, alpha=0.7,
+                for run in vr:
+                    ax.plot(run["x_reg"],run["y_reg"],"o",color=col,ms=4,alpha=0.7)
+                    xr=np.linspace(min(run["x_reg"])-0.1,max(run["x_reg"])+0.1,50)
+                    ax.plot(xr,run["a"]+run["b"]*xr,"-",color=col,lw=lw,alpha=0.7,
                         label=f"{sd['name']} R{run['run_no']}")
-
             if sd["avg"] and "slope" in sd["avg"]["params"]:
-                sl = sd["avg"]["params"]["slope"][0]
-                ic = sd["avg"]["params"]["intercept"][0]
+                sl=sd["avg"]["params"]["slope"][0]
+                ic=sd["avg"]["params"]["intercept"][0]
                 notes.append(f"{sd['name']}: slope={fmt_num(sl,3,self.T['dec_sep'])}  int={fmt_num(ic,3,self.T['dec_sep'])}")
-
-        # MMAD tablosu için annotasyon
         if notes:
-            ax.text(0.02,0.98,"\n".join(notes), transform=ax.transAxes,
-                fontsize=9, color="#d0e0f0", va="top", ha="left",
-                bbox=dict(facecolor="#0e1525", alpha=0.7, edgecolor="#2a4060", pad=4))
-
-        ax.set_xlabel("log₁₀(D50, µm)", color=TXT2, fontsize=13)
-        ax.set_ylabel("Probit z", color=TXT2, fontsize=13)
-        ax.set_title(f"Log-Probit  [{flow} L/min]", color=GOLD, fontsize=14, fontweight="bold")
-        ax.tick_params(colors=TXT2)
+            ax.text(0.02,0.98,"\n".join(notes),transform=ax.transAxes,
+                fontsize=9,color="#d0e0f0",va="top",ha="left",
+                bbox=dict(facecolor="#0e1525",alpha=0.7,edgecolor="#2a4060",pad=4))
+        # MMAD alt tablosu
+        vis=[sd for sd in self._visible_series() if sd.get("avg") and "mmad" in sd["avg"]["params"]]
+        if vis:
+            mmad_lines=[]
+            for sd in vis:
+                pr=sd["avg"]["params"]
+                mmad_lines.append(
+                    f"{sd['name']}:  MMAD={fmt_num(pr['mmad'][0],3,self.T['dec_sep'])}  "
+                    f"GSD={fmt_num(pr['gsd'][0],3,self.T['dec_sep'])}  "
+                    f"Slope={fmt_num(pr['slope'][0],3,self.T['dec_sep'])}")
+            ax.text(0.02,0.02,"\n".join(mmad_lines),transform=ax.transAxes,
+                fontsize=8,color="#90c0e0",va="bottom",ha="left",
+                bbox=dict(facecolor="#0e1525",alpha=0.7,edgecolor="#1a3050",pad=4))
+        ax.set_xlabel("log₁₀(D50, µm)",color=TXT2,fontsize=13)
+        ax.set_ylabel("Probit z",color=TXT2,fontsize=13)
+        ax.set_title(f"Log-Probit  [{flow} L/min]",color=GOLD,fontsize=14,fontweight="bold")
+        ax.tick_params(colors=TXT2,labelsize=11)
         for sp in ax.spines.values(): sp.set_color("#2a4060")
-        ax.grid(True, color="#1a3050", ls="--", alpha=0.5)
-        hdls, lbls = ax.get_legend_handles_labels()
+        ax.grid(True,color="#1a3050",ls="--",alpha=0.5)
+        hdls,_=ax.get_legend_handles_labels()
         if hdls:
-            n = len(hdls)
-            ax.legend(fontsize=max(9,12-max(0,n-6)), facecolor="#0e1525",
-                labelcolor="#d0e0f0", ncol=2 if n>6 else 1, framealpha=0.85)
-        fig.tight_layout()
-        self.lp_canvas.draw()
+            n=len(hdls)
+            ax.legend(fontsize=max(9,12-max(0,n-6)),facecolor="#0e1525",
+                labelcolor="#d0e0f0",ncol=2 if n>6 else 1,framealpha=0.85)
+        fig.tight_layout(); self.lp_canvas.draw()
 
-    # ── APSD Dağılım ──────────────────────────────────────────────────────────
+    # ── APSD ──────────────────────────────────────────────────────────────────
     def _plot_dist(self):
         plt.close("all")
-        flow = int(self.flow_combo.currentText())
-        co = NGI_CUTOFFS[flow]
-        vis_all = ["Throat"] + [s for s in GRAPH_STAGES if co.get(s,999)<900]
-        x_all = np.arange(len(vis_all))
-        lim_map = {"ema":20,"fda":15,"usp":25}
-        try: pct = lim_map.get(self.limit_type) or float(self.e_lim_pct.text())
-        except: pct = 20
-
-        fig = self.dist_canvas.figure; fig.clear()
-        fig.patch.set_facecolor(BG)
-        ax = fig.add_subplot(111); ax.set_facecolor("#0e1525")
-
-        ref_masses = None; warnings = []
+        flow=int(self.flow_combo.currentText())
+        co=NGI_CUTOFFS[flow]
+        vis_all=["Throat"]+[s for s in GRAPH_STAGES if co.get(s,999)<900]
+        x_all=np.arange(len(vis_all))
+        lm={"ema":20,"fda":15,"usp":25}
+        try: pct=lm.get(self.limit_type) or float(self.e_lim_pct.text())
+        except: pct=20
+        fig=self.dist_canvas.figure; fig.clear(); fig.patch.set_facecolor(BG)
+        ax=fig.add_subplot(111); ax.set_facecolor("#0e1525")
+        ref_masses=None; warnings=[]
         for sd in self._visible_series():
             if not sd["avg"]: continue
-            ms = [sd["avg"]["avg_masses"].get(s,0) for s in vis_all]
-            valid_runs = [r for r in sd["runs"] if "error" not in r]
-            sds = []
+            ms=[sd["avg"]["avg_masses"].get(s,0) for s in vis_all]
+            vr=[r for r in sd["runs"] if "error" not in r]
+            sds=[]
             for s in vis_all:
-                vals = [r["masses"].get(s,0) for r in valid_runs]
+                vals=[r["masses"].get(s,0) for r in vr]
                 sds.append(float(np.std(vals,ddof=1)) if len(vals)>1 else 0.0)
-            lw = 3 if sd["is_ref"] else 1.8
-            ms2 = 10 if sd["is_ref"] else 5
-            ax.plot(x_all, ms, color=sd["color"], lw=lw, marker="o", markersize=ms2,
-                label=sd["name"], zorder=4)
-            ax.fill_between(x_all, [m-s for m,s in zip(ms,sds)],
-                [m+s for m,s in zip(ms,sds)], color=sd["color"], alpha=0.12, zorder=2)
-            ax.errorbar(x_all, ms, yerr=sds, fmt="none",
-                color=sd["color"], capsize=4, lw=1.5, alpha=0.5, zorder=3)
-            if sd["is_ref"]: ref_masses = sd["avg"]["avg_masses"]
-
+            lw=3 if sd["is_ref"] else 1.8
+            ax.plot(x_all,ms,color=sd["color"],lw=lw,marker="o",
+                markersize=10 if sd["is_ref"] else 5,label=sd["name"],zorder=4)
+            ax.fill_between(x_all,[m-s for m,s in zip(ms,sds)],
+                [m+s for m,s in zip(ms,sds)],color=sd["color"],alpha=0.12,zorder=2)
+            ax.errorbar(x_all,ms,yerr=sds,fmt="none",
+                color=sd["color"],capsize=4,lw=1.5,alpha=0.5,zorder=3)
+            if sd["is_ref"]: ref_masses=sd["avg"]["avg_masses"]
         if ref_masses:
-            rv = [ref_masses.get(s,0) for s in vis_all]
-            upper = [v*(1+pct/100) for v in rv]
-            lower = [v*(1-pct/100) for v in rv]
-            ax.plot(x_all, upper, "--", color="#FF6060", lw=1.8, alpha=0.8, label=f"+{pct:.0f}%")
-            ax.plot(x_all, lower, "--", color="#FF6060", lw=1.8, alpha=0.8, label=f"–{pct:.0f}%")
-            ax.fill_between(x_all, lower, upper, color="#FF6060", alpha=0.05, zorder=1)
+            rv=[ref_masses.get(s,0) for s in vis_all]
+            upper=[v*(1+pct/100) for v in rv]; lower=[v*(1-pct/100) for v in rv]
+            ax.plot(x_all,upper,"--",color="#FF6060",lw=1.8,alpha=0.8,label=f"+{pct:.0f}%")
+            ax.plot(x_all,lower,"--",color="#FF6060",lw=1.8,alpha=0.8,label=f"–{pct:.0f}%")
+            ax.fill_between(x_all,lower,upper,color="#FF6060",alpha=0.05,zorder=1)
             for sd in self._visible_series():
                 if sd["is_ref"] or not sd["avg"]: continue
-                mt = [sd["avg"]["avg_masses"].get(s,0) for s in vis_all]
+                mt=[sd["avg"]["avg_masses"].get(s,0) for s in vis_all]
                 for s,tv,lo2,hi2 in zip(vis_all,mt,lower,upper):
-                    if tv < lo2 or tv > hi2:
-                        if self.lang == "TR":
-                            yon = "yuksek" if tv>hi2 else "dusuk"
-                            lim_lbl = "limit"
-                        else:
-                            yon = "high" if tv>hi2 else "low"
-                            lim_lbl = "limit"
-                        warnings.append((f"{sd['name']} - {s}: {fmt_num(tv,4,self.T['dec_sep'])} ({yon}) {lim_lbl}", False, False))
-                f2 = calc_f2(ref_masses, sd["avg"]["avg_masses"], co)
+                    if tv<lo2 or tv>hi2:
+                        yon=("yuksek" if tv>hi2 else "dusuk") if self.lang=="TR" else ("high" if tv>hi2 else "low")
+                        lim_lbl="limit"
+                        warnings.append((f"{sd['name']} - {s}: {fmt_num(tv,4,self.T['dec_sep'])} ({yon}) {lim_lbl}",False,False))
+                f2=calc_f2(ref_masses,sd["avg"]["avg_masses"],co)
                 if f2 is not None:
-                    pf2 = self.T["f2_pass"] if f2>=50 else self.T["f2_fail"]
-                    warnings.insert(0, (f"{self.T['f2_label']} {sd['name']}: f2={fmt_num(f2,1,self.T['dec_sep'])} ({pf2})", f2>=50, True))
-
-        ax.set_xticks(list(x_all)); ax.set_xticklabels(vis_all, rotation=20, ha="right", fontsize=12)
-        ax.tick_params(colors=TXT2)
+                    pf2=self.T["f2_pass"] if f2>=50 else self.T["f2_fail"]
+                    warnings.insert(0,(f"{self.T['f2_label']} {sd['name']}: f2={fmt_num(f2,1,self.T['dec_sep'])} ({pf2})",f2>=50,True))
+        ax.set_xticks(list(x_all))
+        ax.set_xticklabels(vis_all,rotation=20,ha="right",fontsize=12)
+        ax.tick_params(colors=TXT2,labelsize=11)
         for sp in ax.spines.values(): sp.set_color("#2a4060")
-        ax.set_xlabel(self.T["stage"], color=TXT2, fontsize=13)
-        ylbl = "Ort. Kutle (mg/atis)" if self.lang=="TR" else "Mean Mass (mg/actuation)"
-        ax.set_ylabel(ylbl, color=TXT2, fontsize=13)
-        ttl = f"APSD [{flow} L/min] Ort±SD"
-        if ref_masses: ttl += f"  |  Limit ±{pct:.0f}%"
-        ax.set_title(ttl, color=GOLD, fontsize=13, fontweight="bold")
-        ax.grid(True, color="#1a3050", ls="--", alpha=0.5)
-        hdls, _ = ax.get_legend_handles_labels()
+        ylbl="Ort. Kutle (mg/atis)" if self.lang=="TR" else "Mean Mass (mg/actuation)"
+        ax.set_xlabel(self.T["stage"],color=TXT2,fontsize=13)
+        ax.set_ylabel(ylbl,color=TXT2,fontsize=13)
+        ttl=f"APSD [{flow} L/min] Ort±SD"
+        if ref_masses: ttl+=f"  |  Limit ±{pct:.0f}%"
+        ax.set_title(ttl,color=GOLD,fontsize=13,fontweight="bold")
+        ax.grid(True,color="#1a3050",ls="--",alpha=0.5)
+        hdls,_=ax.get_legend_handles_labels()
         if hdls:
-            n = len(hdls)
-            ax.legend(fontsize=max(9,12-max(0,n-6)), facecolor="#0e1525",
-                labelcolor="#d0e0f0", ncol=2 if n>6 else 1, framealpha=0.85)
-        fig.tight_layout()
-        self.dist_canvas.draw()
-
-        # Uyarı paneli
+            n=len(hdls)
+            ax.legend(fontsize=max(9,12-max(0,n-6)),facecolor="#0e1525",
+                labelcolor="#d0e0f0",ncol=2 if n>6 else 1,framealpha=0.85,loc="upper right")
+        fig.tight_layout(); self.dist_canvas.draw()
         for i in reversed(range(self.warn_layout.count())):
-            w = self.warn_layout.itemAt(i).widget()
-            if w: w.deleteLater()
+            w=self.warn_layout.itemAt(i).widget()
+            if w: w.setParent(None)
         if warnings:
             self.warn_scroll.setVisible(True)
             for item in warnings:
-                wt, is_pass, is_f2 = item
+                wt,is_pass,is_f2=item
                 if is_f2:
-                    bg = "#0a2a0a" if is_pass else "#2a0a0a"
-                    tc = "#90ee90" if is_pass else "#FF6060"
+                    bg="#0a2a0a" if is_pass else "#2a0a0a"
+                    tc="#90ee90" if is_pass else "#FF6060"
                 else:
-                    bg = "#2a0a0a"; tc = "#FFB0B0"
-                wl = QLabel(f"  {wt}")
-                wl.setStyleSheet(f"color:{tc};font-weight:bold;font-size:13px;"
+                    bg="#2a0a0a"; tc="#FFB0B0"
+                wl=QLabel(f"  {wt}")
+                wl.setStyleSheet(f"color:{tc};font-weight:bold;font-size:12px;"
                     f"background:{bg};border-radius:3px;padding:3px 6px;")
                 self.warn_layout.addWidget(wl)
         else:
             self.warn_scroll.setVisible(False)
 
-    # ── Özet sekmesi ─────────────────────────────────────────────────────────
+    # ── Özet ──────────────────────────────────────────────────────────────────
     def _show_summary(self):
         for i in reversed(range(self.summary_layout.count()-1)):
-            w = self.summary_layout.itemAt(i).widget()
-            if w: w.deleteLater()
-        T = self.T; ds = T["dec_sep"]
-        try: rsd_lim = float(self.e_rsd.text())
-        except: rsd_lim = 5.0
-        params_list = [
-            ("metered",T["metered"]),("delivered",T["delivered"]),
-            ("fpd",T["fp_dose"]),("fpf",T["fp_frac"]),
-            ("mmad","MMAD (um)"),("gsd","GSD"),
-            ("slope",T["slope_lbl"]),("intercept",T["int_lbl"]),("r2",T["r2_lbl"])
-        ]
+            w=self.summary_layout.itemAt(i).widget()
+            if w: w.setParent(None)
+        T=self.T; ds=T["dec_sep"]
+        try: rsd_lim=float(self.e_rsd.text())
+        except: rsd_lim=5.0
+        params_list=[("metered",T["metered"]),("delivered",T["delivered"]),
+                     ("fpd",T["fp_dose"]),("fpf",T["fp_frac"]),
+                     ("mmad","MMAD (um)"),("gsd","GSD"),
+                     ("slope",T["slope_lbl"]),("intercept",T["int_lbl"]),("r2",T["r2_lbl"])]
         for sd in self.all_series:
-            ref_tag = f"  [{T['ref_label']}]" if sd["is_ref"] else ""
-            sh = QLabel(f"▌ {sd['name']}{ref_tag}")
-            sh.setStyleSheet(f"color:{sd['color']};font-size:13px;font-weight:bold;"
+            rt=f"  [{T['ref_label']}]" if sd["is_ref"] else ""
+            sh=QLabel(f"▌ {sd['name']}{rt}")
+            sh.setStyleSheet(f"color:{sd['color']};font-size:14px;font-weight:bold;"
                 f"background:{BG2};border-left:3px solid {sd['color']};padding:4px 8px;")
-            self.summary_layout.insertWidget(self.summary_layout.count()-1, sh)
-
-            vr = [r for r in sd["runs"] if "error" not in r]
-            if not vr:
-                el = QLabel("  Veri yok"); el.setStyleSheet("color:#ff6060;padding:2px 12px;background:transparent;")
-                self.summary_layout.insertWidget(self.summary_layout.count()-1, el); continue
-
-            n = len(vr)
-            # Tablo widget
-            tf = QFrame(); tf.setStyleSheet(f"background:#111827;border-radius:4px;border:1px solid #1a2a40;")
-            tfl = QVBoxLayout(tf); tfl.setContentsMargins(2,2,2,2); tfl.setSpacing(1)
-
-            widths = [148]+[88]*n+[88,88,76,62]
-            hdrs_list = [T["param"]]+[f"Run {r['run_no']}" for r in vr]+[T["mean"],T["sd"],T["rsd"],T["accept"]]
-            # Header
-            hframe = QFrame(); hframe.setStyleSheet("background:#1F4E79;border-radius:2px;")
-            hfl = QHBoxLayout(hframe); hfl.setContentsMargins(2,2,2,2); hfl.setSpacing(0)
-            for h,w in zip(hdrs_list,widths):
-                l=QLabel(h); l.setFixedWidth(w); l.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                l.setStyleSheet("color:white;font-weight:bold;font-size:12px;background:transparent;")
+            self.summary_layout.insertWidget(self.summary_layout.count()-1,sh)
+            vr=[r for r in sd["runs"] if "error" not in r]
+            if not vr: continue
+            n=len(vr)
+            tf=QFrame(); tf.setStyleSheet("background:#111827;border-radius:4px;border:1px solid #1a2a40;")
+            tfl=QVBoxLayout(tf); tfl.setContentsMargins(2,2,2,2); tfl.setSpacing(1)
+            ws=[150]+[90]*n+[90,90,76,62]
+            hdrs=[T["param"]]+[f"Run {r['run_no']}" for r in vr]+[T["mean"],T["sd"],T["rsd"],T["accept"]]
+            hf=QFrame(); hf.setStyleSheet("background:#1F4E79;border-radius:2px;")
+            hfl=QHBoxLayout(hf); hfl.setContentsMargins(2,2,2,2); hfl.setSpacing(0)
+            for h,w in zip(hdrs,ws):
+                l=QLabel(h); l.setFixedWidth(w)
+                l.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                l.setStyleSheet("color:white;font-weight:bold;font-size:11px;background:transparent;")
                 hfl.addWidget(l)
-            hfl.addStretch(); tfl.addWidget(hframe)
-
+            hfl.addStretch(); tfl.addWidget(hf)
             for i2,(key,lbl) in enumerate(params_list):
                 vals=[r.get(key) for r in vr if key in r]
                 if not vals: continue
@@ -1621,111 +1436,102 @@ class NGIApp(QMainWindow):
                 bg="#1a1a2a" if i2%2==0 else "transparent"
                 dr=QFrame(); dr.setStyleSheet(f"background:{bg};")
                 dfl=QHBoxLayout(dr); dfl.setContentsMargins(2,1,2,1); dfl.setSpacing(0)
-                l0=QLabel(lbl); l0.setFixedWidth(widths[0])
+                l0=QLabel(lbl); l0.setFixedWidth(ws[0])
                 l0.setStyleSheet(f"color:{'#FFC600' if ik else '#c0d0e0'};"
-                    f"font-weight:{'bold' if ik else 'normal'};font-size:10px;background:transparent;")
+                    f"font-weight:{'bold' if ik else 'normal'};font-size:11px;background:transparent;")
                 dfl.addWidget(l0)
                 for r2 in vr:
                     v=r2.get(key,0)
-                    l2=QLabel(fmt_num(v,4,ds)); l2.setFixedWidth(88)
+                    l2=QLabel(fmt_num(v,4,ds)); l2.setFixedWidth(90)
                     l2.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    l2.setStyleSheet("color:#d0e8ff;font-size:12px;background:transparent;")
+                    l2.setStyleSheet("color:#d0e8ff;font-size:11px;background:transparent;")
                     dfl.addWidget(l2)
-                for val,w in [(fmt_num(mv,4,ds),88),(fmt_num(sv,4,ds),88),(fmt_num(rv2,2,ds),76)]:
-                    l3=QLabel(val); l3.setFixedWidth(w); l3.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    l3.setStyleSheet("color:#d0e8ff;font-size:12px;background:transparent;")
+                for val,w in [(fmt_num(mv,4,ds),90),(fmt_num(sv,4,ds),90),(fmt_num(rv2,2,ds),76)]:
+                    l3=QLabel(val); l3.setFixedWidth(w)
+                    l3.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    l3.setStyleSheet("color:#d0e8ff;font-size:11px;background:transparent;")
                     dfl.addWidget(l3)
-                pass_lbl=QLabel("OK" if pf else "FAIL"); pass_lbl.setFixedWidth(62)
-                pass_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                pass_lbl.setStyleSheet(f"color:{'#90ee90' if pf else '#ff6060'};"
-                    f"font-weight:bold;font-size:10px;background:transparent;")
-                dfl.addWidget(pass_lbl); dfl.addStretch(); tfl.addWidget(dr)
-            self.summary_layout.insertWidget(self.summary_layout.count()-1, tf)
-
-            # DDU
+                pl=QLabel("OK" if pf else "FAIL"); pl.setFixedWidth(62)
+                pl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                pl.setStyleSheet(f"color:{'#90ee90' if pf else '#ff6060'};"
+                    "font-weight:bold;font-size:11px;background:transparent;")
+                dfl.addWidget(pl); dfl.addStretch(); tfl.addWidget(dr)
+            self.summary_layout.insertWidget(self.summary_layout.count()-1,tf)
             dv=[r.get("delivered",0) for r in vr]
             if dv:
                 dm=float(np.mean(dv)); ds2=float(np.std(dv,ddof=1)) if len(dv)>1 else 0.0
                 dr2=ds2/dm*100 if dm else 0.0
                 dl=QLabel(f"  {T['ddu_label']}: {T['mean']}={fmt_num(dm,4,ds)}mg  "
                     f"{T['sd']}={fmt_num(ds2,4,ds)}  {T['rsd']}={fmt_num(dr2,2,ds)}%")
-                dl.setStyleSheet("color:#90ee90;font-size:11px;background:#1a2a1a;"
+                dl.setStyleSheet("color:#90ee90;font-size:12px;background:#1a2a1a;"
                     "border-radius:4px;padding:4px 8px;")
-                self.summary_layout.insertWidget(self.summary_layout.count()-1, dl)
+                self.summary_layout.insertWidget(self.summary_layout.count()-1,dl)
 
-    # ── Karşılaştırma sekmesi ─────────────────────────────────────────────────
+    # ── Karşılaştırma ─────────────────────────────────────────────────────────
     def _show_compare(self):
         for i in reversed(range(self.compare_layout.count()-1)):
-            w = self.compare_layout.itemAt(i).widget()
-            if w: w.deleteLater()
-        T = self.T; ds = T["dec_sep"]
-        flow = int(self.flow_combo.currentText())
-        co = NGI_CUTOFFS[flow]
-
-        if len(self.all_series) >= 2:
-            # Trend grafiği
+            w=self.compare_layout.itemAt(i).widget()
+            if w: w.setParent(None)
+        T=self.T; ds=T["dec_sep"]
+        flow=int(self.flow_combo.currentText()); co=NGI_CUTOFFS[flow]
+        vis_ser=self._visible_series()
+        if len(vis_ser)>=2:
             plt.close("all")
-            fig2 = Figure(figsize=(9,3.2), facecolor=BG)
-            canvas2 = FigureCanvas(fig2)
-            canvas2.setMaximumHeight(260)
-            ax1 = fig2.add_subplot(121); ax2 = fig2.add_subplot(122)
+            fig2=Figure(figsize=(9,3.2),facecolor=BG)
+            canvas2=FigureCanvas(fig2); canvas2.setMaximumHeight(260)
+            ax1=fig2.add_subplot(121); ax2=fig2.add_subplot(122)
             ax1.set_facecolor("#0e1525"); ax2.set_facecolor("#0e1525")
-            valid_sds = [sd for sd in self._visible_series() if sd["avg"]]
-            names = [sd["name"] for sd in valid_sds]
-            mmads = [sd["avg"]["params"].get("mmad",(0,))[0] for sd in valid_sds]
-            gsds  = [sd["avg"]["params"].get("gsd",(0,))[0] for sd in valid_sds]
-            colors= [sd["color"] for sd in valid_sds]
-            xi = range(len(names))
-            for i,(m,g,c) in enumerate(zip(mmads,gsds,colors)):
+            vsd=[sd for sd in vis_ser if sd["avg"]]
+            names=[sd["name"] for sd in vsd]
+            mmads=[sd["avg"]["params"].get("mmad",(0,))[0] for sd in vsd]
+            gsds=[sd["avg"]["params"].get("gsd",(0,))[0] for sd in vsd]
+            clrs=[sd["color"] for sd in vsd]
+            xi=range(len(names))
+            for i,(m,g,c) in enumerate(zip(mmads,gsds,clrs)):
                 ax1.bar(i,m,color=c,alpha=0.85,width=0.6)
                 ax2.bar(i,g,color=c,alpha=0.85,width=0.6)
             for ax,ttl in [(ax1,T["trend_mmad"]),(ax2,T["trend_gsd"])]:
                 ax.set_xticks(list(xi))
-                ax.set_xticklabels(names,rotation=20,ha="right",fontsize=8,color="#c0d8f0")
-                ax.set_title(ttl,color=GOLD,fontsize=10,fontweight="bold")
+                ax.set_xticklabels(names,rotation=20,ha="right",fontsize=9,color="#c0d8f0")
+                ax.set_title(ttl,color=GOLD,fontsize=11,fontweight="bold")
                 ax.tick_params(colors=TXT2)
                 for sp in ax.spines.values(): sp.set_color("#2a4060")
                 ax.grid(True,axis="y",color="#1a3050",ls="--",alpha=0.5)
             fig2.tight_layout()
-            self.compare_layout.insertWidget(self.compare_layout.count()-1, canvas2)
-
-        # Karşılaştırma tablosu
-        ref_sd = next((sd for sd in self.all_series if sd["is_ref"]), None)
-        params_list = [
-            ("mmad","MMAD (um)"),("gsd","GSD"),
-            ("fpd",T["fp_dose"]),("fpf",T["fp_frac"]),
-            ("slope",T["slope_lbl"]),("intercept",T["int_lbl"]),("r2",T["r2_lbl"])
-        ]
-        tf=QFrame(); tf.setStyleSheet(f"background:#111827;border-radius:4px;border:1px solid #1a2a40;")
+            self.compare_layout.insertWidget(self.compare_layout.count()-1,canvas2)
+        ref_sd=next((sd for sd in vis_ser if sd["is_ref"]),None)
+        params_list=[("mmad","MMAD (um)"),("gsd","GSD"),
+                     ("fpd",T["fp_dose"]),("fpf",T["fp_frac"]),
+                     ("slope",T["slope_lbl"]),("intercept",T["int_lbl"]),("r2",T["r2_lbl"])]
+        tf=QFrame(); tf.setStyleSheet("background:#111827;border-radius:4px;border:1px solid #1a2a40;")
         tfl=QVBoxLayout(tf); tfl.setContentsMargins(2,2,2,2); tfl.setSpacing(1)
-        vis_ser = self._visible_series()
-        n_ser=len(vis_ser)
-        widths=[138]+[104]*n_ser
-        hdrs_list=[T["param"]]+[sd["name"]+(" ★" if sd["is_ref"] else "") for sd in vis_ser]
-        hframe=QFrame(); hframe.setStyleSheet("background:#1F4E79;border-radius:2px;")
-        hfl=QHBoxLayout(hframe); hfl.setContentsMargins(2,2,2,2); hfl.setSpacing(0)
-        for h,w in zip(hdrs_list,widths):
-            l=QLabel(h); l.setFixedWidth(w); l.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            l.setStyleSheet("color:white;font-weight:bold;font-size:12px;background:transparent;")
+        n_ser=len(vis_ser); ws=[140]+[104]*n_ser
+        hdrs=[T["param"]]+[sd["name"]+(" ★" if sd["is_ref"] else "") for sd in vis_ser]
+        hf=QFrame(); hf.setStyleSheet("background:#1F4E79;border-radius:2px;")
+        hfl=QHBoxLayout(hf); hfl.setContentsMargins(2,2,2,2); hfl.setSpacing(0)
+        for h,w in zip(hdrs,ws):
+            l=QLabel(h); l.setFixedWidth(w)
+            l.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            l.setStyleSheet("color:white;font-weight:bold;font-size:11px;background:transparent;")
             hfl.addWidget(l)
-        hfl.addStretch(); tfl.addWidget(hframe)
-
+        hfl.addStretch(); tfl.addWidget(hf)
         for i2,(key,lbl) in enumerate(params_list):
             bg="#1a1a2a" if i2%2==0 else "transparent"
             dr=QFrame(); dr.setStyleSheet(f"background:{bg};")
             dfl=QHBoxLayout(dr); dfl.setContentsMargins(2,1,2,1); dfl.setSpacing(0)
             ik=key in("mmad","gsd","fpd","fpf")
-            l0=QLabel(lbl); l0.setFixedWidth(widths[0])
+            l0=QLabel(lbl); l0.setFixedWidth(ws[0])
             l0.setStyleSheet(f"color:{'#FFC600' if ik else '#c0d0e0'};"
-                f"font-weight:{'bold' if ik else 'normal'};font-size:10px;background:transparent;")
+                f"font-weight:{'bold' if ik else 'normal'};font-size:11px;background:transparent;")
             dfl.addWidget(l0)
             rv=None
             if ref_sd and ref_sd["avg"] and key in ref_sd["avg"]["params"]:
                 rv=ref_sd["avg"]["params"][key][0]
             for sd in vis_ser:
                 if not sd["avg"] or key not in sd["avg"]["params"]:
-                    l2=QLabel("-"); l2.setFixedWidth(104); l2.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    l2.setStyleSheet("color:#888;font-size:12px;background:transparent;")
+                    l2=QLabel("-"); l2.setFixedWidth(104)
+                    l2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    l2.setStyleSheet("color:#888;font-size:11px;background:transparent;")
                     dfl.addWidget(l2); continue
                 val=sd["avg"]["params"][key][0]; txt=fmt_num(val,4,ds); clr="#d0e8ff"
                 if rv and not sd["is_ref"] and rv>0:
@@ -1733,22 +1539,21 @@ class NGIApp(QMainWindow):
                     diff_str=fmt_num(abs(diff),1,ds); sign="+" if diff>=0 else "-"
                     txt+=f"\n({sign}{diff_str}%)"
                     clr="#90ee90" if abs(diff)<10 else "#FFB060" if abs(diff)<20 else "#FF6060"
-                l2=QLabel(txt); l2.setFixedWidth(104); l2.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                l2.setStyleSheet(f"color:{clr};font-size:12px;background:transparent;")
+                l2=QLabel(txt); l2.setFixedWidth(104)
+                l2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                l2.setStyleSheet(f"color:{clr};font-size:11px;background:transparent;")
                 dfl.addWidget(l2)
             dfl.addStretch(); tfl.addWidget(dr)
-        self.compare_layout.insertWidget(self.compare_layout.count()-1, tf)
-
-        # f2 bölümü
+        self.compare_layout.insertWidget(self.compare_layout.count()-1,tf)
         if ref_sd and ref_sd["avg"]:
-            f2_hdr=QLabel(f"  {T['f2_label']}")
-            f2_hdr.setStyleSheet(f"color:#FFD700;font-size:13px;font-weight:bold;"
+            f2h=QLabel(f"  {T['f2_label']}")
+            f2h.setStyleSheet(f"color:#FFD700;font-size:14px;font-weight:bold;"
                 f"background:{BG2};border-left:3px solid #FFD700;padding:4px 8px;")
-            self.compare_layout.insertWidget(self.compare_layout.count()-1, f2_hdr)
-            lim_map={"ema":20,"fda":15,"usp":25}
-            try: pct=lim_map.get(self.limit_type) or float(self.e_lim_pct.text())
+            self.compare_layout.insertWidget(self.compare_layout.count()-1,f2h)
+            lm={"ema":20,"fda":15,"usp":25}
+            try: pct=lm.get(self.limit_type) or float(self.e_lim_pct.text())
             except: pct=20
-            for sd in self._visible_series():
+            for sd in vis_ser:
                 if sd["is_ref"] or not sd["avg"]: continue
                 f2=calc_f2(ref_sd["avg"]["avg_masses"],sd["avg"]["avg_masses"],co)
                 if f2 is None: continue
@@ -1758,124 +1563,107 @@ class NGIApp(QMainWindow):
                 ff=QLabel(f"  {sd['name']}  f2 = {fmt_num(f2,1,ds)}   {pf2}")
                 ff.setStyleSheet(f"color:{clr};font-size:13px;font-weight:bold;"
                     f"background:{bg_f2};border-radius:4px;padding:6px 8px;")
-                self.compare_layout.insertWidget(self.compare_layout.count()-1, ff)
+                self.compare_layout.insertWidget(self.compare_layout.count()-1,ff)
 
-    # ── Dil değiştir ──────────────────────────────────────────────────────────
+    # ── Dil ───────────────────────────────────────────────────────────────────
     def _toggle_lang(self):
-        self.lang = "EN" if self.lang=="TR" else "TR"
-        self.T = L[self.lang]
-        T = self.T
+        self.lang="EN" if self.lang=="TR" else "TR"
+        self.T=L[self.lang]; T=self.T
         self.setWindowTitle(T["title"])
-        self.lbl_title.setText(T["title"])
-        self.lbl_sub.setText(T["subtitle"])
+        self.lbl_title.setText(T["title"]); self.lbl_sub.setText(T["subtitle"])
         self.btn_lang.setText(T["lang_btn"])
-        self.btn_add.setText(T["add_series"])
-        self.btn_del.setText(T["del_series"])
-        self.btn_calc.setText(T["calculate"])
-        self.btn_clr.setText(T["clear"])
-        self.btn_pdf.setText(T["export_pdf"])
-        self.btn_csv.setText(T["load_csv"])
+        self.btn_calc.setText(T["calculate"]); self.btn_clr.setText(T["clear"])
+        self.btn_pdf.setText(T["export_pdf"]); self.btn_csv.setText(T["load_csv"])
+        self.btn_add.setText("+ "+T["add_series"])
         self.chk_lp_avg.setText(T["lp_avg_only"])
         self.chk_delivered_tp.setText(T["delivered_tp"])
         self._refresh_cutoffs()
-        for p in self.series_panels:
-            p.update_lang(T)
-        # Sekme isimleri
-        tab_keys = ["tab_results","tab_plot","tab_dist","tab_summary","tab_compare"]
-        for i, k in enumerate(tab_keys):
-            self.tabs.setTabText(i, T[k])
-        # Accordion bölüm label'larını güncelle
-        self._update_series_count()
-        self.btn_sel_all.setText("Tumunu Sec" if self.lang=="TR" else "Select All")
-        self.btn_sel_none.setText("Tumunu Gizle" if self.lang=="TR" else "Hide All")
-        # Mevcut sonuçları yeniden render
+        for p in self.series_panels: p.update_lang(T)
+        for i,k in enumerate(["tab_results","tab_plot","tab_dist","tab_summary","tab_compare"]):
+            self.tabs.setTabText(i,T[k])
         if self.all_series:
-            cur = self.tabs.currentIndex()
-            if cur == 0: self._show_results()
-            elif cur == 1: self._plot_lp()
-            elif cur == 2: self._plot_dist()
-            elif cur == 3: self._show_summary()
-            elif cur == 4: self._show_compare()
+            cur=self.tabs.currentIndex()
+            if cur==0: self._show_results()
+            elif cur==1: self._plot_lp()
+            elif cur==2: self._plot_dist()
+            elif cur==3: self._show_summary()
+            elif cur==4: self._show_compare()
 
-    # ── CSV Yükle ─────────────────────────────────────────────────────────────
+    # ── CSV ───────────────────────────────────────────────────────────────────
     def _load_csv(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "CSV Dosyasi Sec / Select CSV File", "",
+        path,_=QFileDialog.getOpenFileName(self,"CSV Sec / Select CSV","",
             "CSV (*.csv);;All Files (*.*)")
         if not path: return
-        try: series_dict, flow, warnings = parse_csv(path)
+        try: series_dict,flow,warnings=parse_csv(path)
         except Exception as ex:
-            QMessageBox.critical(self, "CSV Hatasi", str(ex)); return
+            QMessageBox.critical(self,"CSV Hatasi",str(ex)); return
         if series_dict is None:
-            QMessageBox.critical(self, "CSV Hatasi", warnings[0] if warnings else "Okunamadi"); return
+            QMessageBox.critical(self,"CSV Hatasi",
+                warnings[0] if warnings else "Okunamadi"); return
         for w in warnings:
-            if w == "csv_err_flow":
-                QMessageBox.warning(self, "", self.T["csv_err_flow"])
+            if w=="csv_err_flow":
+                QMessageBox.warning(self,"",self.T["csv_err_flow"])
             elif w.startswith("csv_4runs__"):
-                QMessageBox.warning(self, "", self.T["csv_4runs"].format(s=w.replace("csv_4runs__","")))
-        # Referans kolonu yoksa sor
-        has_ref = any(v["ref"] for v in series_dict.values())
+                QMessageBox.warning(self,"",self.T["csv_4runs"].format(
+                    s=w.replace("csv_4runs__","")))
+        has_ref=any(v["ref"] for v in series_dict.values())
         if not has_ref:
-            dlg = QDialog(self)
-            dlg.setWindowTitle(self.T["csv_ref_ask"])
-            dlg.setMinimumWidth(360)
-            dlg.setStyleSheet(STYLE)
-            vl = QVBoxLayout(dlg)
+            dlg=QDialog(self); dlg.setWindowTitle(self.T["csv_ref_ask"])
+            dlg.setMinimumWidth(340); dlg.setStyleSheet(STYLE)
+            vl=QVBoxLayout(dlg)
             vl.addWidget(QLabel(self.T["csv_ref_ask"]))
-            lst = QListWidget(); lst.setStyleSheet(f"background:{BG3};border:1px solid #2a4060;")
+            lst=QListWidget()
+            lst.setStyleSheet(f"background:{BG3};border:1px solid #2a4060;")
             for name in list(series_dict.keys())+[self.T["csv_ref_none"]]:
                 lst.addItem(QListWidgetItem(name))
-            lst.setCurrentRow(0)
-            vl.addWidget(lst)
-            btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel)
+            lst.setCurrentRow(0); vl.addWidget(lst)
+            btns=QDialogButtonBox(
+                QDialogButtonBox.StandardButton.Ok|
+                QDialogButtonBox.StandardButton.Cancel)
             btns.accepted.connect(dlg.accept); btns.rejected.connect(dlg.reject)
             vl.addWidget(btns)
-            if dlg.exec() == QDialog.DialogCode.Accepted:
-                sel = lst.currentItem().text() if lst.currentItem() else ""
-                if sel and sel != self.T["csv_ref_none"]:
-                    for k in series_dict: series_dict[k]["ref"] = (k==sel)
-        # Flow ayarla
+            if dlg.exec()==QDialog.DialogCode.Accepted:
+                sel=lst.currentItem().text() if lst.currentItem() else ""
+                if sel and sel!=self.T["csv_ref_none"]:
+                    for k in series_dict: series_dict[k]["ref"]=(k==sel)
         if flow in NGI_CUTOFFS:
-            self.flow_combo.setCurrentText(str(flow))
-            self._on_flow(str(flow))
-        # Mevcut serileri temizle
-        for p in self.series_panels: p.deleteLater()
-        self.series_panels.clear(); self.all_series = []
-        self._clear_results()
-        # Serileri yükle
+            self.flow_combo.setCurrentText(str(flow)); self._on_flow(str(flow))
+        # Mevcut serileri temizle - setParent(None) ile
+        for p in self.series_panels: p.setParent(None)
+        self.series_panels.clear()
+        self.all_series=[]; self._clear_results()
+        # Yeni serileri yükle
         for si,(name,data) in enumerate(series_dict.items()):
             self._add_series()
-            p = self.series_panels[-1]
+            p=self.series_panels[-1]
             p.name_edit.setText(name)
             if si==0 and p.ref_check:
                 p.ref_check.setChecked(data["ref"])
             for ri,run_data in enumerate(data["runs"][:RUNS_PER_SER]):
-                p.set_masses(ri, run_data["masses"])
-        n_s=len(series_dict); n_r=sum(len(v["runs"]) for v in series_dict.values())
-        self._update_series_count()
-        self.status_lbl.setText(self.T["csv_loaded"].format(n=n_s, r=n_r))
+                p.set_masses(ri,run_data["masses"])
+        n_s=len(series_dict)
+        n_r=sum(len(v["runs"]) for v in series_dict.values())
+        self.status_lbl.setText(self.T["csv_loaded"].format(n=n_s,r=n_r))
 
-    # ── PDF Rapor ─────────────────────────────────────────────────────────────
+    # ── PDF ───────────────────────────────────────────────────────────────────
     def _export_pdf(self):
         if not self.all_series:
             QMessageBox.warning(self,"","Oncelikle hesaplama yapiniz."); return
-        path, _ = QFileDialog.getSaveFileName(
-            self, "PDF Kaydet", f"NGI_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
-            "PDF (*.pdf)")
+        path,_=QFileDialog.getSaveFileName(self,"PDF Kaydet",
+            f"NGI_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.pdf","PDF (*.pdf)")
         if not path: return
-        meta = {"product":self.e_product.text(),"batch":self.e_batch.text(),
-                "operator":self.e_operator.text(),"date":self.e_date.text()}
-        lm = {"ema":20,"fda":15,"usp":25}
-        try: pct = lm.get(self.limit_type) or float(self.e_lim_pct.text())
+        meta={"product":self.e_product.text(),"batch":self.e_batch.text(),
+              "operator":self.e_operator.text(),"date":self.e_date.text()}
+        lm={"ema":20,"fda":15,"usp":25}
+        try: pct=lm.get(self.limit_type) or float(self.e_lim_pct.text())
         except: pct=20
         try: rsd_lim=float(self.e_rsd.text())
         except: rsd_lim=5.0
         try:
-            # make_pdf_multi bu dosyada tanimli
             make_pdf_multi(path,self.all_series,meta,
-                           int(self.flow_combo.currentText()),
-                           self.T,pct,rsd_lim,lang=self.lang)
-            import subprocess, platform
+                int(self.flow_combo.currentText()),
+                self.T,pct,rsd_lim,lang=self.lang)
+            import subprocess,platform
             try:
                 if platform.system()=="Windows": os.startfile(path)
                 elif platform.system()=="Darwin": subprocess.Popen(["open",path])
@@ -1886,6 +1674,7 @@ class NGIApp(QMainWindow):
             import traceback
             QMessageBox.critical(self,"PDF Hatasi",
                 str(ex)+"\n\n"+traceback.format_exc()[-600:])
+
 
 def make_pdf_multi(path, all_series, meta, flow, T, limit_pct=20, rsd_lim=5.0, lang="TR"):
     from reportlab.lib.pagesizes import A4
@@ -2409,6 +2198,7 @@ def make_pdf_multi(path, all_series, meta, flow, T, limit_pct=20, rsd_lim=5.0, l
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setApplicationName("NGI Impactor Analysis")
