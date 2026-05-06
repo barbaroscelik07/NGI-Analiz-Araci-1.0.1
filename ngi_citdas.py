@@ -872,118 +872,223 @@ class NGIApp(QMainWindow):
         return hdr
 
     def _build_left(self, layout):
-        # Meta bilgiler
-        meta_group = QGroupBox("Analiz Bilgileri")
-        meta_layout = QFormLayout(meta_group)
-        meta_layout.setSpacing(4); meta_layout.setContentsMargins(8,12,8,8)
-        self.e_product  = QLineEdit(); meta_layout.addRow(self.T["product"],  self.e_product)
-        self.e_batch    = QLineEdit(); meta_layout.addRow(self.T["batch"],    self.e_batch)
-        self.e_operator = QLineEdit(); meta_layout.addRow(self.T["operator"], self.e_operator)
-        self.e_date     = QLineEdit(datetime.datetime.now().strftime("%d.%m.%Y"))
-        meta_layout.addRow(self.T["date"], self.e_date)
-        layout.addWidget(meta_group)
+        layout.setSpacing(0)
 
-        # Flow + Geçerlilik
-        ff = QFrame(); ff.setFrameShape(QFrame.Shape.StyledPanel)
-        ff.setStyleSheet(f"background:{BG3};border-radius:6px;border:1px solid #2a4060;")
-        ffl = QHBoxLayout(ff); ffl.setSpacing(6); ffl.setContentsMargins(8,4,8,4)
+        # ── Analiz Bilgileri bölümü ───────────────────────────────────────────
+        self.sec_meta = self._make_section(layout,
+            "ti-file-description", "Analiz Bilgileri", expanded=True)
+        meta_w = QWidget(); meta_l = QFormLayout(meta_w)
+        meta_l.setSpacing(5); meta_l.setContentsMargins(10,6,10,8)
+        meta_l.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        self.e_product  = QLineEdit(); meta_l.addRow(self.T["product"],  self.e_product)
+        self.e_batch    = QLineEdit(); meta_l.addRow(self.T["batch"],    self.e_batch)
+        self.e_operator = QLineEdit(); meta_l.addRow(self.T["operator"], self.e_operator)
+        self.e_date     = QLineEdit(datetime.datetime.now().strftime("%d.%m.%Y"))
+        meta_l.addRow(self.T["date"], self.e_date)
+        self.sec_meta["body"].addWidget(meta_w)
+
+        # ── Akış & Parametreler bölümü ────────────────────────────────────────
+        self.sec_flow = self._make_section(layout,
+            "ti-adjustments-horizontal", "Akis & Parametreler", expanded=True)
+        flow_w = QWidget(); flow_l = QVBoxLayout(flow_w)
+        flow_l.setSpacing(5); flow_l.setContentsMargins(10,4,10,8)
+
+        # Flow satırı
+        fr = QHBoxLayout(); fr.setSpacing(6)
         lbl_fr = QLabel(self.T["flow_rate"])
-        lbl_fr.setStyleSheet(f"color:{GOLD};font-weight:bold;background:transparent;border:none;")
-        ffl.addWidget(lbl_fr)
+        lbl_fr.setStyleSheet(f"color:{GOLD};font-weight:bold;background:transparent;")
+        fr.addWidget(lbl_fr)
         self.flow_combo = QComboBox()
         for fl in sorted(NGI_CUTOFFS.keys()):
             self.flow_combo.addItem(str(fl))
         self.flow_combo.setCurrentText("60")
-        self.flow_combo.setFixedWidth(64)
+        self.flow_combo.setFixedWidth(70)
         self.flow_combo.currentTextChanged.connect(self._on_flow)
-        ffl.addWidget(self.flow_combo)
-        ffl.addWidget(QLabel("L/min"))
-        sep = QFrame(); sep.setFrameShape(QFrame.Shape.VLine); sep.setFixedHeight(20)
-        ffl.addWidget(sep)
-        ffl.addWidget(QLabel(self.T["valid_range"]))
-        self.e_lo = QLineEdit("15"); self.e_lo.setFixedWidth(42)
-        ffl.addWidget(self.e_lo)
-        ffl.addWidget(QLabel("–"))
-        self.e_hi = QLineEdit("85"); self.e_hi.setFixedWidth(42)
-        ffl.addWidget(self.e_hi)
-        ffl.addStretch()
-        layout.addWidget(ff)
+        fr.addWidget(self.flow_combo)
+        fr.addWidget(QLabel("L/min"))
+        flow_l.addLayout(fr)
 
-        # Cut-off gösterimi
-        self.cbox = QFrame()
-        self.cbox.setStyleSheet(f"background:#111827;border-radius:6px;border:1px solid #1a2a40;")
-        self.cbox_layout = QHBoxLayout(self.cbox)
+        # Geçerlilik satırı
+        vr = QHBoxLayout(); vr.setSpacing(4)
+        vr.addWidget(QLabel(self.T["valid_range"]))
+        self.e_lo = QLineEdit("15"); self.e_lo.setFixedWidth(48)
+        vr.addWidget(self.e_lo)
+        vr.addWidget(QLabel("–"))
+        self.e_hi = QLineEdit("85"); self.e_hi.setFixedWidth(48)
+        vr.addWidget(self.e_hi)
+        vr.addStretch()
+        flow_l.addLayout(vr)
+
+        # RSD + Delivered
+        or_ = QHBoxLayout(); or_.setSpacing(6)
+        or_.addWidget(QLabel(self.T["rsd_limit"]))
+        self.e_rsd = QLineEdit("5"); self.e_rsd.setFixedWidth(40)
+        or_.addWidget(self.e_rsd)
+        or_.addWidget(QLabel("%"))
+        self.chk_delivered_tp = QCheckBox(self.T["delivered_tp"])
+        or_.addWidget(self.chk_delivered_tp)
+        or_.addStretch()
+        flow_l.addLayout(or_)
+
+        # Cut-off
+        co_w = QWidget()
+        co_w.setStyleSheet(f"background:#111827;border-radius:4px;")
+        self.cbox_layout = QHBoxLayout(co_w)
         self.cbox_layout.setContentsMargins(6,3,6,3); self.cbox_layout.setSpacing(3)
-        layout.addWidget(self.cbox)
+        flow_l.addWidget(co_w)
+        self.cbox = co_w
         self._refresh_cutoffs()
+        self.sec_flow["body"].addWidget(flow_w)
 
-        # Buton satırları
-        bf1 = QHBoxLayout(); bf1.setSpacing(4)
+        # ── Seriler bölümü ────────────────────────────────────────────────────
+        self.sec_series = self._make_section(layout,
+            "ti-chart-dots", "Seriler (0)", expanded=True)
+
+        # Buton satırı 1
+        bf1 = QHBoxLayout(); bf1.setSpacing(4); bf1.setContentsMargins(10,4,10,2)
         self.btn_add = QPushButton(self.T["add_series"])
         self.btn_add.setFixedHeight(30); self.btn_add.clicked.connect(self._add_series)
         bf1.addWidget(self.btn_add)
-        self.btn_del = QPushButton(self.T["del_series"])
-        self.btn_del.setObjectName("btn_del"); self.btn_del.setFixedHeight(30)
-        self.btn_del.clicked.connect(self._del_series); bf1.addWidget(self.btn_del)
         self.btn_calc = QPushButton(self.T["calculate"])
         self.btn_calc.setObjectName("btn_calc"); self.btn_calc.setFixedHeight(30)
         self.btn_calc.clicked.connect(self._calculate); bf1.addWidget(self.btn_calc)
         self.btn_clr = QPushButton(self.T["clear"])
         self.btn_clr.setObjectName("btn_clr"); self.btn_clr.setFixedHeight(30)
         self.btn_clr.clicked.connect(self._clear); bf1.addWidget(self.btn_clr)
-        layout.addLayout(bf1)
+        btn_w1 = QWidget(); btn_w1.setLayout(bf1)
+        self.sec_series["body"].addWidget(btn_w1)
 
-        bf2 = QHBoxLayout(); bf2.setSpacing(4)
+        # Buton satırı 2
+        bf2 = QHBoxLayout(); bf2.setSpacing(4); bf2.setContentsMargins(10,0,10,4)
         self.btn_pdf = QPushButton(self.T["export_pdf"])
         self.btn_pdf.setObjectName("btn_pdf"); self.btn_pdf.setFixedHeight(30)
         self.btn_pdf.clicked.connect(self._export_pdf); bf2.addWidget(self.btn_pdf)
         self.btn_csv = QPushButton(self.T["load_csv"])
         self.btn_csv.setObjectName("btn_csv"); self.btn_csv.setFixedHeight(30)
         self.btn_csv.clicked.connect(self._load_csv); bf2.addWidget(self.btn_csv)
-        layout.addLayout(bf2)
+        btn_w2 = QWidget(); btn_w2.setLayout(bf2)
+        self.sec_series["body"].addWidget(btn_w2)
 
-        # RSD + Delivered seçeneği
-        opts = QHBoxLayout(); opts.setSpacing(8)
-        opts.addWidget(QLabel(self.T["rsd_limit"]))
-        self.e_rsd = QLineEdit("5"); self.e_rsd.setFixedWidth(42)
-        opts.addWidget(self.e_rsd)
-        opts.addWidget(QLabel("%"))
-        self.chk_delivered_tp = QCheckBox(self.T["delivered_tp"])
-        opts.addWidget(self.chk_delivered_tp)
-        opts.addStretch()
-        layout.addLayout(opts)
-
-        # Seri seçim paneli başlık
-        sel_hdr = QHBoxLayout(); sel_hdr.setSpacing(4)
-        sel_title = QLabel("Seriler")
-        sel_title.setStyleSheet(f"color:{GOLD};font-weight:bold;font-size:13px;background:transparent;")
-        sel_hdr.addWidget(sel_title)
-        sel_hdr.addStretch()
-        self.btn_sel_all = QPushButton("Tümünü Seç")
+        # Tümünü seç/gizle
+        sel_row = QHBoxLayout(); sel_row.setSpacing(4); sel_row.setContentsMargins(10,0,10,4)
+        self.btn_sel_all = QPushButton("Tumunu Sec")
         self.btn_sel_all.setFixedHeight(24)
         self.btn_sel_all.setStyleSheet("font-size:11px;padding:2px 8px;")
         self.btn_sel_all.clicked.connect(self._select_all_series)
-        sel_hdr.addWidget(self.btn_sel_all)
-        self.btn_sel_none = QPushButton("Tümünü Gizle")
+        sel_row.addWidget(self.btn_sel_all)
+        self.btn_sel_none = QPushButton("Tumunu Gizle")
         self.btn_sel_none.setFixedHeight(24)
         self.btn_sel_none.setStyleSheet("font-size:11px;padding:2px 8px;background:#3a1a1a;")
         self.btn_sel_none.clicked.connect(self._deselect_all_series)
-        sel_hdr.addWidget(self.btn_sel_none)
-        layout.addLayout(sel_hdr)
+        sel_row.addWidget(self.btn_sel_none)
+        sel_row.addStretch()
+        sel_w = QWidget(); sel_w.setLayout(sel_row)
+        self.sec_series["body"].addWidget(sel_w)
 
-        # Seri listesi (scroll)
+        # Seri listesi scroll
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        scroll.setMinimumHeight(200)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet(f"background:{BG2};border:none;")
         self.series_container = QWidget()
         self.series_container.setStyleSheet(f"background:{BG2};")
         self.series_layout = QVBoxLayout(self.series_container)
-        self.series_layout.setSpacing(4)
-        self.series_layout.setContentsMargins(2,2,4,2)
+        self.series_layout.setSpacing(3)
+        self.series_layout.setContentsMargins(6,4,6,4)
         self.series_layout.addStretch()
         scroll.setWidget(self.series_container)
-        layout.addWidget(scroll, 1)
+        self.sec_series["body"].addWidget(scroll)
+
+        layout.addStretch()
+
+    def _make_section(self, parent_layout, icon, title, expanded=True):
+        """Accordion bölümü oluştur"""
+        frame = QFrame()
+        frame.setStyleSheet(f"""
+            QFrame#sec_outer {{
+                background:{BG2};
+                border-bottom: 0.5px solid #1a2a40;
+            }}
+        """)
+        frame.setObjectName("sec_outer")
+        vl = QVBoxLayout(frame); vl.setSpacing(0); vl.setContentsMargins(0,0,0,0)
+
+        # Başlık butonu
+        hdr_btn = QPushButton()
+        hdr_btn.setCheckable(True)
+        hdr_btn.setChecked(expanded)
+        hdr_btn.setStyleSheet(f"""
+            QPushButton {{
+                background:{BG3};
+                border:none;
+                border-bottom: 0.5px solid #1a2a40;
+                text-align:left;
+                padding: 9px 14px;
+                color: #c0d8f0;
+                font-size: 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{ background:#1f2d4a; }}
+            QPushButton:checked {{ background:{NAVY2}; }}
+        """)
+
+        hdr_inner = QHBoxLayout()
+        hdr_inner.setContentsMargins(0,0,0,0); hdr_inner.setSpacing(8)
+        icon_lbl = QLabel(f'<i class="ti {icon}"></i>')
+        icon_lbl.setStyleSheet(f"color:{GOLD};font-size:14px;background:transparent;")
+        # QLabel HTML render yerine text tabanlı ikon - basit unicode alternatif
+        icon_map = {
+            "ti-file-description": "📋",
+            "ti-adjustments-horizontal": "⚙",
+            "ti-chart-dots": "◉",
+        }
+        ico_char = icon_map.get(icon, "▸")
+        ico_lbl = QLabel(ico_char)
+        ico_lbl.setStyleSheet(f"color:{GOLD};font-size:13px;background:transparent;border:none;")
+        hdr_inner.addWidget(ico_lbl)
+        self._sec_title_label = QLabel(title)
+        sec_lbl = QLabel(title)
+        sec_lbl.setStyleSheet("color:#c0d8f0;font-size:12px;font-weight:bold;background:transparent;border:none;")
+        hdr_inner.addWidget(sec_lbl)
+        hdr_inner.addStretch()
+        arr_lbl = QLabel("▾")
+        arr_lbl.setStyleSheet("color:#5a8ab0;font-size:10px;background:transparent;border:none;")
+        hdr_inner.addWidget(arr_lbl)
+
+        hdr_widget = QWidget(); hdr_widget.setLayout(hdr_inner)
+        hdr_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        hdr_btn_layout = QVBoxLayout(hdr_btn)
+        hdr_btn_layout.setContentsMargins(0,0,0,0)
+        hdr_btn_layout.addWidget(hdr_widget)
+        vl.addWidget(hdr_btn)
+
+        # İçerik alanı
+        body_widget = QWidget()
+        body_widget.setStyleSheet(f"background:{BG};")
+        body_layout = QVBoxLayout(body_widget)
+        body_layout.setSpacing(0); body_layout.setContentsMargins(0,0,0,0)
+        body_widget.setVisible(expanded)
+        vl.addWidget(body_widget)
+
+        # Toggle bağlantısı
+        def toggle(checked, bw=body_widget, al=arr_lbl):
+            bw.setVisible(checked)
+            al.setText("▾" if checked else "▸")
+        hdr_btn.toggled.connect(toggle)
+
+        parent_layout.addWidget(frame)
+        return {"frame": frame, "header": hdr_btn, "body": body_layout,
+                "title_lbl": sec_lbl}
+
+    def _update_series_count(self):
+        """Seriler bölüm başlığını güncelle"""
+        n = len(self.series_panels)
+        try:
+            self.sec_series["title_lbl"].setText(f"Seriler ({n})")
+        except: pass
+
 
     def _build_right(self, layout):
         self.tabs = QTabWidget()
@@ -1037,15 +1142,21 @@ class NGIApp(QMainWindow):
         self.e_lim_pct.editingFinished.connect(lambda: self._plot_dist() if self.all_series else None)
         lim_hl.addWidget(self.e_lim_pct); lim_hl.addStretch()
         dist_layout.addWidget(lim_panel)
+        # Grafik + uyarılar scroll area içinde
         self.dist_canvas = FigureCanvas(Figure(figsize=(9,5.0), facecolor=BG))
         dist_layout.addWidget(self.dist_canvas, 1)
-        # Uyarı paneli
-        self.warn_frame = QFrame()
-        self.warn_frame.setVisible(False)
-        self.warn_frame.setStyleSheet(f"background:#2a0a0a;border-radius:4px;border:1px solid #5a1a1a;")
-        self.warn_layout = QVBoxLayout(self.warn_frame)
-        self.warn_layout.setContentsMargins(8,4,8,4); self.warn_layout.setSpacing(2)
-        dist_layout.addWidget(self.warn_frame)
+        # Uyarı scroll area
+        self.warn_scroll = QScrollArea()
+        self.warn_scroll.setWidgetResizable(True)
+        self.warn_scroll.setMaximumHeight(180)
+        self.warn_scroll.setVisible(False)
+        self.warn_scroll.setStyleSheet("background:#1a0a0a;border:none;")
+        self.warn_container = QWidget()
+        self.warn_container.setStyleSheet("background:#1a0a0a;")
+        self.warn_layout = QVBoxLayout(self.warn_container)
+        self.warn_layout.setContentsMargins(6,4,6,4); self.warn_layout.setSpacing(3)
+        self.warn_scroll.setWidget(self.warn_container)
+        dist_layout.addWidget(self.warn_scroll)
         self.tabs.addTab(self.tab_dist, self.T["tab_dist"])
 
         # Özet sekmesi
@@ -1103,11 +1214,13 @@ class NGIApp(QMainWindow):
         count = self.series_layout.count()
         self.series_layout.insertWidget(count-1, panel)
         self.series_panels.append(panel)
+        self._update_series_count()
 
     def _del_specific(self, panel):
         if len(self.series_panels) <= 1: return
         self.series_panels.remove(panel)
         panel.deleteLater()
+        self._update_series_count()
 
     def _replot_if_done(self):
         if not self.all_series: return
@@ -1266,7 +1379,7 @@ class NGIApp(QMainWindow):
                 for lbl, val in params:
                     is_key = lbl in (T["fp_dose"],T["fp_frac"],"MMAD","GSD")
                     l1 = QLabel(lbl)
-                    l1.setStyleSheet(f"color:{TXT2};font-size:10px;background:transparent;")
+                    l1.setStyleSheet(f"color:{TXT2};font-size:12px;background:transparent;")
                     l2 = QLabel(val)
                     l2.setStyleSheet(f"color:{'#FFC600' if is_key else '#e0f0ff'};"
                         f"font-weight:{'bold' if is_key else 'normal'};"
@@ -1292,7 +1405,7 @@ class NGIApp(QMainWindow):
         for h,w in zip(hdrs,widths):
             l = QLabel(h); l.setFixedWidth(w)
             l.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            l.setStyleSheet("color:white;font-weight:bold;font-size:10px;background:transparent;")
+            l.setStyleSheet("color:white;font-weight:bold;font-size:12px;background:transparent;")
             hfl.addWidget(l)
         hfl.addStretch()
         tfl.addWidget(hframe)
@@ -1377,16 +1490,16 @@ class NGIApp(QMainWindow):
                 fontsize=9, color="#d0e0f0", va="top", ha="left",
                 bbox=dict(facecolor="#0e1525", alpha=0.7, edgecolor="#2a4060", pad=4))
 
-        ax.set_xlabel("log₁₀(D50, µm)", color=TXT2, fontsize=11)
-        ax.set_ylabel("Probit z", color=TXT2, fontsize=11)
-        ax.set_title(f"Log-Probit  [{flow} L/min]", color=GOLD, fontsize=12, fontweight="bold")
+        ax.set_xlabel("log₁₀(D50, µm)", color=TXT2, fontsize=13)
+        ax.set_ylabel("Probit z", color=TXT2, fontsize=13)
+        ax.set_title(f"Log-Probit  [{flow} L/min]", color=GOLD, fontsize=14, fontweight="bold")
         ax.tick_params(colors=TXT2)
         for sp in ax.spines.values(): sp.set_color("#2a4060")
         ax.grid(True, color="#1a3050", ls="--", alpha=0.5)
         hdls, lbls = ax.get_legend_handles_labels()
         if hdls:
             n = len(hdls)
-            ax.legend(fontsize=max(6,9-max(0,n-6)), facecolor="#0e1525",
+            ax.legend(fontsize=max(9,12-max(0,n-6)), facecolor="#0e1525",
                 labelcolor="#d0e0f0", ncol=2 if n>6 else 1, framealpha=0.85)
         fig.tight_layout()
         self.lp_canvas.draw()
@@ -1437,27 +1550,32 @@ class NGIApp(QMainWindow):
                 mt = [sd["avg"]["avg_masses"].get(s,0) for s in vis_all]
                 for s,tv,lo2,hi2 in zip(vis_all,mt,lower,upper):
                     if tv < lo2 or tv > hi2:
-                        yon = "yuksek" if tv>hi2 else "dusuk"
-                        warnings.append((f"{sd['name']} - {s}: {fmt_num(tv,4,self.T['dec_sep'])} ({yon}) limit", False, False))
+                        if self.lang == "TR":
+                            yon = "yuksek" if tv>hi2 else "dusuk"
+                            lim_lbl = "limit"
+                        else:
+                            yon = "high" if tv>hi2 else "low"
+                            lim_lbl = "limit"
+                        warnings.append((f"{sd['name']} - {s}: {fmt_num(tv,4,self.T['dec_sep'])} ({yon}) {lim_lbl}", False, False))
                 f2 = calc_f2(ref_masses, sd["avg"]["avg_masses"], co)
                 if f2 is not None:
                     pf2 = self.T["f2_pass"] if f2>=50 else self.T["f2_fail"]
                     warnings.insert(0, (f"{self.T['f2_label']} {sd['name']}: f2={fmt_num(f2,1,self.T['dec_sep'])} ({pf2})", f2>=50, True))
 
-        ax.set_xticks(list(x_all)); ax.set_xticklabels(vis_all, rotation=20, ha="right", fontsize=10)
+        ax.set_xticks(list(x_all)); ax.set_xticklabels(vis_all, rotation=20, ha="right", fontsize=12)
         ax.tick_params(colors=TXT2)
         for sp in ax.spines.values(): sp.set_color("#2a4060")
-        ax.set_xlabel(self.T["stage"], color=TXT2, fontsize=11)
+        ax.set_xlabel(self.T["stage"], color=TXT2, fontsize=13)
         ylbl = "Ort. Kutle (mg/atis)" if self.lang=="TR" else "Mean Mass (mg/actuation)"
-        ax.set_ylabel(ylbl, color=TXT2, fontsize=11)
+        ax.set_ylabel(ylbl, color=TXT2, fontsize=13)
         ttl = f"APSD [{flow} L/min] Ort±SD"
         if ref_masses: ttl += f"  |  Limit ±{pct:.0f}%"
-        ax.set_title(ttl, color=GOLD, fontsize=11, fontweight="bold")
+        ax.set_title(ttl, color=GOLD, fontsize=13, fontweight="bold")
         ax.grid(True, color="#1a3050", ls="--", alpha=0.5)
         hdls, _ = ax.get_legend_handles_labels()
         if hdls:
             n = len(hdls)
-            ax.legend(fontsize=max(6,9-max(0,n-6)), facecolor="#0e1525",
+            ax.legend(fontsize=max(9,12-max(0,n-6)), facecolor="#0e1525",
                 labelcolor="#d0e0f0", ncol=2 if n>6 else 1, framealpha=0.85)
         fig.tight_layout()
         self.dist_canvas.draw()
@@ -1467,7 +1585,7 @@ class NGIApp(QMainWindow):
             w = self.warn_layout.itemAt(i).widget()
             if w: w.deleteLater()
         if warnings:
-            self.warn_frame.setVisible(True)
+            self.warn_scroll.setVisible(True)
             for item in warnings:
                 wt, is_pass, is_f2 = item
                 if is_f2:
@@ -1476,11 +1594,11 @@ class NGIApp(QMainWindow):
                 else:
                     bg = "#2a0a0a"; tc = "#FFB0B0"
                 wl = QLabel(f"  {wt}")
-                wl.setStyleSheet(f"color:{tc};font-weight:bold;font-size:11px;"
+                wl.setStyleSheet(f"color:{tc};font-weight:bold;font-size:13px;"
                     f"background:{bg};border-radius:3px;padding:3px 6px;")
                 self.warn_layout.addWidget(wl)
         else:
-            self.warn_frame.setVisible(False)
+            self.warn_scroll.setVisible(False)
 
     # ── Özet sekmesi ─────────────────────────────────────────────────────────
     def _show_summary(self):
@@ -1520,7 +1638,7 @@ class NGIApp(QMainWindow):
             hfl = QHBoxLayout(hframe); hfl.setContentsMargins(2,2,2,2); hfl.setSpacing(0)
             for h,w in zip(hdrs_list,widths):
                 l=QLabel(h); l.setFixedWidth(w); l.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                l.setStyleSheet("color:white;font-weight:bold;font-size:10px;background:transparent;")
+                l.setStyleSheet("color:white;font-weight:bold;font-size:12px;background:transparent;")
                 hfl.addWidget(l)
             hfl.addStretch(); tfl.addWidget(hframe)
 
@@ -1541,11 +1659,11 @@ class NGIApp(QMainWindow):
                     v=r2.get(key,0)
                     l2=QLabel(fmt_num(v,4,ds)); l2.setFixedWidth(88)
                     l2.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    l2.setStyleSheet("color:#d0e8ff;font-size:10px;background:transparent;")
+                    l2.setStyleSheet("color:#d0e8ff;font-size:12px;background:transparent;")
                     dfl.addWidget(l2)
                 for val,w in [(fmt_num(mv,4,ds),88),(fmt_num(sv,4,ds),88),(fmt_num(rv2,2,ds),76)]:
                     l3=QLabel(val); l3.setFixedWidth(w); l3.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    l3.setStyleSheet("color:#d0e8ff;font-size:10px;background:transparent;")
+                    l3.setStyleSheet("color:#d0e8ff;font-size:12px;background:transparent;")
                     dfl.addWidget(l3)
                 pass_lbl=QLabel("OK" if pf else "FAIL"); pass_lbl.setFixedWidth(62)
                 pass_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1618,7 +1736,7 @@ class NGIApp(QMainWindow):
         hfl=QHBoxLayout(hframe); hfl.setContentsMargins(2,2,2,2); hfl.setSpacing(0)
         for h,w in zip(hdrs_list,widths):
             l=QLabel(h); l.setFixedWidth(w); l.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            l.setStyleSheet("color:white;font-weight:bold;font-size:10px;background:transparent;")
+            l.setStyleSheet("color:white;font-weight:bold;font-size:12px;background:transparent;")
             hfl.addWidget(l)
         hfl.addStretch(); tfl.addWidget(hframe)
 
@@ -1637,7 +1755,7 @@ class NGIApp(QMainWindow):
             for sd in vis_ser:
                 if not sd["avg"] or key not in sd["avg"]["params"]:
                     l2=QLabel("-"); l2.setFixedWidth(104); l2.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    l2.setStyleSheet("color:#888;font-size:10px;background:transparent;")
+                    l2.setStyleSheet("color:#888;font-size:12px;background:transparent;")
                     dfl.addWidget(l2); continue
                 val=sd["avg"]["params"][key][0]; txt=fmt_num(val,4,ds); clr="#d0e8ff"
                 if rv and not sd["is_ref"] and rv>0:
@@ -1646,7 +1764,7 @@ class NGIApp(QMainWindow):
                     txt+=f"\n({sign}{diff_str}%)"
                     clr="#90ee90" if abs(diff)<10 else "#FFB060" if abs(diff)<20 else "#FF6060"
                 l2=QLabel(txt); l2.setFixedWidth(104); l2.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                l2.setStyleSheet(f"color:{clr};font-size:10px;background:transparent;")
+                l2.setStyleSheet(f"color:{clr};font-size:12px;background:transparent;")
                 dfl.addWidget(l2)
             dfl.addStretch(); tfl.addWidget(dr)
         self.compare_layout.insertWidget(self.compare_layout.count()-1, tf)
@@ -1696,6 +1814,13 @@ class NGIApp(QMainWindow):
         tab_keys = ["tab_results","tab_plot","tab_dist","tab_summary","tab_compare"]
         for i, k in enumerate(tab_keys):
             self.tabs.setTabText(i, T[k])
+        # Accordion bölüm label'larını güncelle
+        try:
+            self.sec_series["title_lbl"].setText(
+                f"{'Seriler' if self.lang=='TR' else 'Series'} ({len(self.series_panels)})")
+        except: pass
+        self.btn_sel_all.setText("Tumunu Sec" if self.lang=="TR" else "Select All")
+        self.btn_sel_none.setText("Tumunu Gizle" if self.lang=="TR" else "Hide All")
         # Mevcut sonuçları yeniden render
         if self.all_series:
             cur = self.tabs.currentIndex()
@@ -1760,6 +1885,7 @@ class NGIApp(QMainWindow):
             for ri,run_data in enumerate(data["runs"][:RUNS_PER_SER]):
                 p.set_masses(ri, run_data["masses"])
         n_s=len(series_dict); n_r=sum(len(v["runs"]) for v in series_dict.values())
+        self._update_series_count()
         self.status_lbl.setText(self.T["csv_loaded"].format(n=n_s, r=n_r))
 
     # ── PDF Rapor ─────────────────────────────────────────────────────────────
@@ -2308,7 +2434,7 @@ def make_pdf_multi(path, all_series, meta, flow, T, limit_pct=20, rsd_lim=5.0, l
     story.append(HRFlowable(width="100%", thickness=0.8, color=colors.black))
     story.append(Paragraph(
         f"NGI Analysis Tool v5  |  Ph.Eur 2.9.18 / USP &lt;601&gt;  |  "
-        f"Generated: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+        f"Generated: {datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}",
         ps(6.5, False, colors.black, TA_CENTER)))
 
     doc.build(story)
