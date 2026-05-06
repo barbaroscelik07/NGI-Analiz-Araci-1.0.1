@@ -119,11 +119,27 @@ def calc_run(masses, flow, lo=15, hi=85, delivered_tp=False):
     fpd   = d5u /100*ism; fpf   = fpd /metered*100 if metered>0 else 0
     fpd3  = d3u /100*ism; fpf3  = fpd3/metered*100 if metered>0 else 0
     fpd15 = d15u/100*ism; fpf15 = fpd15/metered*100 if metered>0 else 0
+    # D10 / D50 / D90 — kümülatif eğriden log-interp
+    def _dv_at(target_pct):
+        """Diameter at target cumulative % (log interpolation on pts_all)"""
+        for i in range(len(pts_all)-1):
+            d1,u1 = pts_all[i]; d2,u2 = pts_all[i+1]
+            if u1 <= target_pct <= u2 and u2 > u1:
+                t = (target_pct - u1) / (u2 - u1)
+                return 10**(math.log10(d1) + t*(math.log10(d2)-math.log10(d1)))
+        # Fallback: regresyon
+        try:
+            return 10**((norm.ppf(target_pct/100) - a) / b)
+        except: return None
+    d10 = _dv_at(10.0)
+    d50 = _dv_at(50.0)  # MMAD ile aynı
+    d90 = _dv_at(90.0)
     res.update({"n":len(valid),"a":a,"b":b,"slope":b,"intercept":a+5,"r2":r2,
                 "mmad":mmad,"gsd":gsd,
                 "fpd":fpd,"fpf":fpf,
                 "fpd3":fpd3,"fpf3":fpf3,
                 "fpd15":fpd15,"fpf15":fpf15,
+                "d10":d10,"d50":d50,"d90":d90,
                 "x_reg":x,"y_reg":y})
     return res
 
@@ -135,7 +151,7 @@ def calc_series_avg(runs):
         vals=[r["masses"].get(s,0) for r in valid]
         avg_masses[s]=float(np.mean(vals))
     params={}
-    for p in ["mmad","gsd","fpd","fpf","fpd3","fpf3","fpd15","fpf15","metered","delivered","slope","intercept","r2"]:
+    for p in ["mmad","gsd","fpd","fpf","fpd3","fpf3","fpd15","fpf15","d10","d50","d90","metered","delivered","slope","intercept","r2"]:
         vals=[r[p] for r in valid if p in r]
         if vals:
             m=float(np.mean(vals)); sd=float(np.std(vals,ddof=1)) if len(vals)>1 else 0.0
@@ -648,7 +664,7 @@ class SeriesPanel(QFrame):
                 border: 0.5px solid rgba(255,198,0,0.2);
             }
         """)
-        self.setFixedHeight(36)
+        self.setFixedHeight(30)
         self.entries=[{s:QLineEdit("0.000") for s in DISP_STAGES}
                        for _ in range(RUNS_PER_SER)]
         self._build()
@@ -684,17 +700,24 @@ class SeriesPanel(QFrame):
             self.ref_check=None
         # Düzenle
         self.edit_btn=QPushButton("✏")
-        self.edit_btn.setFixedSize(26,26)
-        self.edit_btn.setToolTip("Stage verilerini gir")
-        self.edit_btn.setStyleSheet(f"background:#1a3a6a;border:1px solid #2a5a9a;"
-            f"border-radius:4px;font-size:11px;")
+        self.edit_btn.setFixedSize(22,22)
+        self.edit_btn.setToolTip("Stage verilerini gir / Edit data")
+        self.edit_btn.setStyleSheet("""
+            QPushButton{background:transparent;border:none;
+                color:#2a5a90;font-size:13px;border-radius:3px;}
+            QPushButton:hover{color:#4a9ae8;background:rgba(20,50,100,0.3);}
+        """)
         self.edit_btn.clicked.connect(self._open_edit)
         hl.addWidget(self.edit_btn)
-        # Sil
-        self.del_btn=QPushButton("✕")
-        self.del_btn.setFixedSize(26,26)
-        self.del_btn.setStyleSheet(f"background:#3a1a1a;border:1px solid #6a2020;"
-            f"border-radius:4px;font-size:11px;")
+        # Üç nokta menü (sil)
+        self.del_btn=QPushButton("⋯")
+        self.del_btn.setFixedSize(22,22)
+        self.del_btn.setToolTip("Seriyi sil")
+        self.del_btn.setStyleSheet("""
+            QPushButton{background:transparent;border:none;
+                color:#3a5070;font-size:15px;font-weight:bold;border-radius:3px;}
+            QPushButton:hover{color:#FF6060;background:rgba(100,20,20,0.3);}
+        """)
         hl.addWidget(self.del_btn)
 
     def _open_edit(self):
@@ -753,6 +776,8 @@ class NGIApp(QMainWindow):
         self.flow=60; self.limit_type="ema"
         self.calc_thread=None
         self._sc_ser_checks = {}
+        self._sec_series = None
+        self._threads = []
         self._setup(); self._build_ui()
         self._add_series()
 
@@ -1048,8 +1073,8 @@ class NGIApp(QMainWindow):
     def _update_series_count(self):
         n=len(self.series_panels)
         lbl="Seriler" if self.lang=="TR" else "Series"
-        try: self._sec_series["title_lbl"].setText(f"{lbl} ({n})")
-        except: pass
+        if self._sec_series and "title_lbl" in self._sec_series:
+            self._sec_series["title_lbl"].setText(f"{lbl} ({n})")
 
 
     def _build_right(self, layout):
@@ -1070,7 +1095,8 @@ class NGIApp(QMainWindow):
         row1.addWidget(QLabel("Parametre:"))
         self.scatter_param_grp=QButtonGroup(self)
         self._sc_param_btns={}
-        for key,lbl in [("fpd","FPD"),("fpf","FPF"),("mmad","MMAD"),("gsd","GSD")]:
+        for key,lbl in [("fpd","FPD"),("fpf","FPF"),("mmad","MMAD"),("gsd","GSD"),
+                          ("d10","D10"),("d50","D50"),("d90","D90")]:
             btn=QPushButton(lbl); btn.setCheckable(True)
             btn.setFixedHeight(26)
             btn.setStyleSheet("""
@@ -1144,6 +1170,7 @@ class NGIApp(QMainWindow):
         sc_ser_vl.addWidget(sc_ser_scroll, 1)
         sc_body.addWidget(sc_ser_frame)
         sl.addLayout(sc_body, 1)
+        self.tabs.addTab(self.tab_summary, self.T["tab_summary"])
         self.tabs.addTab(self.tab_scatter, "Nokta Grafik")
         # Parametre/ölçek değişince yeniden çiz
         for btn in self._sc_param_btns.values():
@@ -1162,6 +1189,15 @@ class NGIApp(QMainWindow):
         lpl.addLayout(lp_ctrl)
         self.lp_canvas=FigureCanvas(Figure(figsize=(9,5), facecolor=BG))
         lpl.addWidget(self.lp_canvas,1)
+        # Bilgi etiketi - grafiğin altında
+        self.lp_info_lbl=QLabel("")
+        self.lp_info_lbl.setVisible(False)
+        self.lp_info_lbl.setTextFormat(Qt.TextFormat.RichText)
+        self.lp_info_lbl.setWordWrap(True)
+        self.lp_info_lbl.setStyleSheet(
+            f"background:#111827;color:#90c0e0;font-size:11px;"
+            f"padding:6px 10px;border-top:1px solid #1a2a40;border-radius:0 0 4px 4px;")
+        lpl.addWidget(self.lp_info_lbl)
         self.tabs.addTab(self.tab_lp, self.T["tab_plot"])
 
         # Dağılım — tüm sekme scroll içinde
@@ -1217,7 +1253,6 @@ class NGIApp(QMainWindow):
         self.summary_layout.setSpacing(6); self.summary_layout.setContentsMargins(8,8,8,8)
         self.summary_layout.addStretch()
         self.tab_summary.setWidget(self.summary_widget)
-        self.tabs.addTab(self.tab_summary, self.T["tab_summary"])
 
         # Karşılaştırma
         self.tab_compare=QScrollArea(); self.tab_compare.setWidgetResizable(True)
@@ -1337,17 +1372,21 @@ class NGIApp(QMainWindow):
         self.calc_thread=CalcThread(si,flow,lo,hi,self.chk_delivered_tp.isChecked())
         self.calc_thread.done.connect(self._on_calc_done)
         self.calc_thread.error.connect(self._on_calc_error)
+        self.calc_thread.finished.connect(lambda: self._thread_cleanup())
         self.calc_thread.start()
+        # Thread referansını listede tut (GC'den koru)
+        if not hasattr(self,'_threads'): self._threads=[]
+        self._threads.append(self.calc_thread)
 
     def _on_calc_done(self, results):
         self.all_series=results; self.btn_calc.setEnabled(True)
         self._clear_results()
         self._rebuild_scatter_series_list()
         cur=self.tabs.currentIndex()
-        if cur==0: self._plot_scatter()
-        elif cur==1: self._plot_lp()
-        elif cur==2: self._plot_dist()
-        elif cur==3: self._show_summary()
+        if cur==0: self._show_summary()
+        elif cur==1: self._plot_scatter()
+        elif cur==2: self._plot_lp()
+        elif cur==3: self._plot_dist()
         elif cur==4: self._show_compare()
         self.status_lbl.setText(self.T["status_done"])
 
@@ -1355,12 +1394,17 @@ class NGIApp(QMainWindow):
         self.btn_calc.setEnabled(True)
         QMessageBox.critical(self,"Hesaplama Hatasi",msg[:500])
 
+    def _thread_cleanup(self):
+        """Tamamlanan thread'leri listeden temizle"""
+        if hasattr(self,'_threads'):
+            self._threads=[t for t in self._threads if t.isRunning()]
+
     def _on_tab_change(self, idx):
         if not self.all_series: return
-        if idx==0: self._plot_scatter()
-        elif idx==1: self._plot_lp()
-        elif idx==2: self._plot_dist()
-        elif idx==3: self._show_summary()
+        if idx==0: self._show_summary()
+        elif idx==1: self._plot_scatter()
+        elif idx==2: self._plot_lp()
+        elif idx==3: self._plot_dist()
         elif idx==4: self._show_compare()
 
     # ── Sonuçlar ──────────────────────────────────────────────────────────────
@@ -1407,6 +1451,8 @@ class NGIApp(QMainWindow):
         self.sc_row2_widget.setVisible(show_scale)
         self._plot_scatter()
 
+    
+
     def _get_scatter_param(self):
         for key, btn in self._sc_param_btns.items():
             if btn.isChecked(): return key
@@ -1418,7 +1464,7 @@ class NGIApp(QMainWindow):
         return "5"
 
     def _get_scatter_key(self):
-        """Gerçek parametre anahtarını döndür (fpd3, fpd15 gibi)"""
+        """Gerçek parametre anahtarını döndür"""
         param = self._get_scatter_param()
         scale = self._get_scatter_scale()
         if param == "fpd":
@@ -1426,12 +1472,11 @@ class NGIApp(QMainWindow):
         elif param == "fpf":
             return {"5":"fpf","3":"fpf3","15":"fpf15"}[scale]
         else:
-            return param  # mmad, gsd
+            return param  # mmad, gsd, d10, d50, d90
 
     def _get_scatter_label(self):
         param = self._get_scatter_param()
         scale = self._get_scatter_scale()
-        ds = self.T["dec_sep"]
         if param == "fpd":
             d = {"5":"5","3":"3","15":"1,5"}[scale]
             return f"FPD ≤{d} µm [mg]"
@@ -1440,557 +1485,116 @@ class NGIApp(QMainWindow):
             return f"FPF ≤{d} µm [%]"
         elif param == "mmad": return "MMAD [µm]"
         elif param == "gsd":  return "GSD"
+        elif param == "d10":  return "D10 [µm]"
+        elif param == "d50":  return "D50 [µm]"
+        elif param == "d90":  return "D90 [µm]"
         return param
 
     def _plot_scatter(self):
         if not self.all_series: return
         plt.close("all")
-        fig = self.scatter_canvas.figure; fig.clear()
+        fig=self.scatter_canvas.figure; fig.clear()
         fig.patch.set_facecolor(BG)
-        ax = fig.add_subplot(111); ax.set_facecolor("#0e1525")
+        ax=fig.add_subplot(111); ax.set_facecolor("#0e1525")
 
-        key = self._get_scatter_key()
-        lbl = self._get_scatter_label()
-        ds  = self.T["dec_sep"]
+        key=self._get_scatter_key()
+        lbl=self._get_scatter_label()
+        ds=self.T["dec_sep"]
 
-        # Limit hesabı
-        lm = {"ema":20,"fda":15,"usp":25}
-        try: pct = lm.get(self.limit_type) or float(self.e_lim_pct.text())
-        except: pct = 20
+        lm={"ema":20,"fda":15,"usp":25}
+        try: pct=lm.get(self.limit_type) or float(self.e_lim_pct.text())
+        except: pct=20
 
-        # Referans değeri bul
-        ref_val = None
-        ref_sd  = next((sd for sd in self.all_series if sd["is_ref"]), None)
+        ref_val=None
+        ref_sd=next((sd for sd in self.all_series if sd["is_ref"]),None)
         if ref_sd and ref_sd["avg"] and key in ref_sd["avg"]["params"]:
-            ref_val = ref_sd["avg"]["params"][key][0]
+            ref_val=ref_sd["avg"]["params"][key][0]
 
-        # Görünür seriler
-        visible = [sd for sd in self.all_series
-                   if sd["name"] in getattr(self,'_sc_ser_checks',{})
-                   and self._sc_ser_checks[sd["name"]].isChecked()]
+        visible=[sd for sd in self.all_series
+                 if sd["name"] in getattr(self,"_sc_ser_checks",{})
+                 and self._sc_ser_checks[sd["name"]].isChecked()]
 
         if not visible:
             ax.text(0.5,0.5,"Seri seçilmedi",transform=ax.transAxes,
                 ha="center",va="center",color=TXT2,fontsize=13)
             fig.tight_layout(); self.scatter_canvas.draw(); return
 
-        # Limit çizgileri (referans varsa)
-        if ref_val is not None and ref_val > 0:
-            ax.axhline(ref_val, color="#4a9ae8", lw=2.0, zorder=2,
-                label=f"Referans = {fmt_num(ref_val,3,ds)}")
-            up = ref_val*(1+pct/100); lo = ref_val*(1-pct/100)
-            ax.axhline(up, color="#FF4444", lw=1.5, ls="--", zorder=2,
-                label=f"+{pct:.0f}% = {fmt_num(up,3,ds)}")
-            ax.axhline(lo, color="#FF4444", lw=1.5, ls="--", zorder=2,
-                label=f"–{pct:.0f}% = {fmt_num(lo,3,ds)}")
-            ax.fill_between([-0.5, len(visible)-0.5], lo, up,
-                color="#FF4444", alpha=0.05, zorder=1)
+        n=len(visible)
+        # Limit çizgileri
+        if ref_val is not None and ref_val>0:
+            ax.axhline(ref_val,color="#4a9ae8",lw=2.0,zorder=2,
+                label=f"Ref = {fmt_num(ref_val,3,ds)}")
+            up=ref_val*(1+pct/100); lo=ref_val*(1-pct/100)
+            ax.axhline(up,color="#FF4444",lw=1.5,ls="--",zorder=2,
+                label=f"+{pct:.0f}%")
+            ax.axhline(lo,color="#FF4444",lw=1.5,ls="--",zorder=2,
+                label=f"–{pct:.0f}%")
+            ax.fill_between([-0.5,n-0.5],lo,up,color="#FF4444",alpha=0.05,zorder=1)
+
+        # Değerleri topla (Y limiti hesabı için)
+        all_vals=[sd["avg"]["params"][key][0]
+                  for sd in visible
+                  if sd["avg"] and key in sd["avg"]["params"]]
+        if not all_vals:
+            fig.tight_layout(); self.scatter_canvas.draw(); return
+
+        y_min=min(all_vals); y_max=max(all_vals)
+        if ref_val:
+            y_min=min(y_min, ref_val*(1-pct/100)*0.9)
+            y_max=max(y_max, ref_val*(1+pct/100)*1.1)
+        y_range=max(y_max-y_min, y_max*0.1, 1e-6)
+        y_pad=y_range*0.25
 
         # Noktaları çiz
-        x_positions = list(range(len(visible)))
-        for xi, sd in enumerate(visible):
+        for xi,sd in enumerate(visible):
             if not sd["avg"] or key not in sd["avg"]["params"]: continue
-            val, val_sd = sd["avg"]["params"][key][0], sd["avg"]["params"][key][1]
-            is_ref = sd["is_ref"]
-            marker = "*" if is_ref else "o"
-            ms = 16 if is_ref else 10
-            zord = 5 if is_ref else 4
-            ax.plot(xi, val, marker=marker, color=sd["color"],
-                markersize=ms, markeredgecolor="white",
-                markeredgewidth=0.8, zorder=zord)
-            # Error bar (SD)
-            if val_sd > 0:
-                ax.errorbar(xi, val, yerr=val_sd, fmt="none",
-                    color=sd["color"], capsize=5, lw=1.5, alpha=0.7, zorder=3)
-            # Değer etiketi
-            ax.annotate(
-                f"{fmt_num(val,3,ds)}",
-                xy=(xi, val), xytext=(0, 14),
-                textcoords="offset points",
-                ha="center", va="bottom",
-                fontsize=9, color=sd["color"],
-                fontweight="bold" if is_ref else "normal")
+            val,val_sd=sd["avg"]["params"][key][0],sd["avg"]["params"][key][1]
+            is_ref=sd["is_ref"]
+            marker="*" if is_ref else "o"
+            ms=18 if is_ref else 10
+            ax.plot(xi,val,marker=marker,color=sd["color"],
+                markersize=ms,markeredgecolor="white",markeredgewidth=0.8,
+                zorder=5 if is_ref else 4)
+            # SD çubuğu
+            if val_sd>0:
+                ax.errorbar(xi,val,yerr=val_sd,fmt="none",
+                    color=sd["color"],capsize=5,lw=1.5,alpha=0.7,zorder=3)
+            # Değer etiketi (noktanın üstünde)
+            ax.annotate(fmt_num(val,3,ds),(xi,val),
+                xytext=(0,12),textcoords="offset points",
+                ha="center",va="bottom",fontsize=10,
+                color=sd["color"],fontweight="bold" if is_ref else "normal")
+            # Seri adı etiketi (noktanın altında, kısa)
+            short_name=sd["name"][:12]+"…" if len(sd["name"])>12 else sd["name"]
+            ax.annotate(short_name,(xi,val),
+                xytext=(0,-16),textcoords="offset points",
+                ha="center",va="top",fontsize=9,
+                color="#8090b0",rotation=0)
+            # Limit dışı kırmızı çerçeve
+            if ref_val and ref_val>0:
+                if val>ref_val*(1+pct/100) or val<ref_val*(1-pct/100):
+                    ax.plot(xi,val,"o",color="none",
+                        markeredgecolor="#FF4444",markeredgewidth=2.5,
+                        markersize=20,zorder=6)
 
-        # Seri etiketleri (seri adı)
-        for xi, sd in enumerate(visible):
-            ax.annotate(
-                sd["name"],
-                xy=(xi, ax.get_ylim()[0] if ax.get_ylim()[0] != 0 else 0),
-                xytext=(xi, ax.get_ylim()[0]),
-                ha="center", va="top",
-                fontsize=9, color="#7090b0", rotation=20)
-
-        # Limit dışı noktaları kırmızı çerçevele
-        if ref_val is not None and ref_val > 0:
-            for xi, sd in enumerate(visible):
-                if not sd["avg"] or key not in sd["avg"]["params"]: continue
-                val = sd["avg"]["params"][key][0]
-                up_v = ref_val*(1+pct/100); lo_v = ref_val*(1-pct/100)
-                if val > up_v or val < lo_v:
-                    ax.plot(xi, val, "o", color="none",
-                        markeredgecolor="#FF4444",
-                        markeredgewidth=2.5,
-                        markersize=18, zorder=6)
-
-        ax.set_xticks(x_positions)
-        ax.set_xticklabels([sd["name"] for sd in visible],
-            rotation=20, ha="right", fontsize=10, color="#c0d8f0")
-        ax.tick_params(colors=TXT2, labelsize=10)
-        for sp in ax.spines.values(): sp.set_color("#2a4060")
-        ax.set_ylabel(lbl, color=TXT2, fontsize=12)
-        title = f"Nokta Grafik — {lbl}"
-        if ref_val: title += f"  |  Limit ±{pct:.0f}%"
-        ax.set_title(title, color=GOLD, fontsize=13, fontweight="bold")
-        ax.grid(True, axis="y", color="#1a3050", ls="--", alpha=0.5)
-        ax.set_xlim(-0.6, len(visible)-0.4)
-        hdls, lbls = ax.get_legend_handles_labels()
-        if hdls:
-            ax.legend(fontsize=9, facecolor="#0e1525", labelcolor="#d0e0f0",
-                framealpha=0.85, loc="upper right")
-        fig.tight_layout()
-        self.scatter_canvas.draw()
-
-
-    def _plot_lp(self):
-        plt.close("all")
-        fig=self.lp_canvas.figure; fig.clear(); fig.patch.set_facecolor(BG)
-        ax=fig.add_subplot(111); ax.set_facecolor("#0e1525")
-        flow=int(self.flow_combo.currentText())
-        avg_only=self.chk_lp_avg.isChecked() or len(self.all_series)>=4
-        if avg_only and not self.chk_lp_avg.isChecked():
-            self.chk_lp_avg.blockSignals(True); self.chk_lp_avg.setChecked(True)
-            self.chk_lp_avg.blockSignals(False)
-        notes=[]
-        for sd in self._visible_series():
-            col=sd["color"]
-            vr=[r for r in sd["runs"] if "error" not in r]
-            if not vr: continue
-            lw=2.5 if sd["is_ref"] else 1.5
-            if avg_only:
-                ml=min(len(r["x_reg"]) for r in vr)
-                ax_=sum(r["x_reg"][:ml] for r in vr)/len(vr)
-                ay_=sum(r["y_reg"][:ml] for r in vr)/len(vr)
-                ba=sum(r["b"] for r in vr)/len(vr)
-                aa=sum(r["a"] for r in vr)/len(vr)
-                ax.plot(ax_,ay_,"o",color=col,ms=6,zorder=4)
-                xr=np.linspace(min(ax_)-0.15,max(ax_)+0.15,60)
-                ax.plot(xr,aa+ba*xr,"-",color=col,lw=lw,label=sd["name"])
-                if sd["avg"] and "mmad" in sd["avg"]["params"]:
-                    mv=sd["avg"]["params"]["mmad"][0]
-                    if mv>0:
-                        ax.axvline(math.log10(mv),color=col,lw=0.8,ls=":",alpha=0.7)
-                        ax.text(math.log10(mv)+0.02,-2.5+list(self._visible_series()).index(sd)*0.35,
-                            f"MMAD={fmt_num(mv,2,self.T['dec_sep'])}",
-                            fontsize=8,color=col,va="bottom")
-            else:
-                for run in vr:
-                    ax.plot(run["x_reg"],run["y_reg"],"o",color=col,ms=4,alpha=0.7)
-                    xr=np.linspace(min(run["x_reg"])-0.1,max(run["x_reg"])+0.1,50)
-                    ax.plot(xr,run["a"]+run["b"]*xr,"-",color=col,lw=lw,alpha=0.7,
-                        label=f"{sd['name']} R{run['run_no']}")
-            if sd["avg"] and "slope" in sd["avg"]["params"]:
-                sl=sd["avg"]["params"]["slope"][0]
-                ic=sd["avg"]["params"]["intercept"][0]
-                notes.append(f"{sd['name']}: slope={fmt_num(sl,3,self.T['dec_sep'])}  int={fmt_num(ic,3,self.T['dec_sep'])}")
-        if notes:
-            ax.text(0.02,0.98,"\n".join(notes),transform=ax.transAxes,
-                fontsize=9,color="#d0e0f0",va="top",ha="left",
-                bbox=dict(facecolor="#0e1525",alpha=0.7,edgecolor="#2a4060",pad=4))
-        # MMAD alt tablosu
-        vis=[sd for sd in self._visible_series() if sd.get("avg") and "mmad" in sd["avg"]["params"]]
-        if vis:
-            mmad_lines=[]
-            for sd in vis:
-                pr=sd["avg"]["params"]
-                mmad_lines.append(
-                    f"{sd['name']}:  MMAD={fmt_num(pr['mmad'][0],3,self.T['dec_sep'])}  "
-                    f"GSD={fmt_num(pr['gsd'][0],3,self.T['dec_sep'])}  "
-                    f"Slope={fmt_num(pr['slope'][0],3,self.T['dec_sep'])}")
-            ax.text(0.02,0.02,"\n".join(mmad_lines),transform=ax.transAxes,
-                fontsize=8,color="#90c0e0",va="bottom",ha="left",
-                bbox=dict(facecolor="#0e1525",alpha=0.7,edgecolor="#1a3050",pad=4))
-        ax.set_xlabel("log₁₀(D50, µm)",color=TXT2,fontsize=13)
-        ax.set_ylabel("Probit z",color=TXT2,fontsize=13)
-        ax.set_title(f"Log-Probit  [{flow} L/min]",color=GOLD,fontsize=14,fontweight="bold")
+        # Eksen düzenlemeleri
+        ax.set_xticks(list(range(n)))
+        ax.set_xticklabels([""]*n)  # Seri adları annotate ile yazıldı
+        ax.set_xlim(-0.6,n-0.4)
+        ax.set_ylim(y_min-y_pad, y_max+y_pad)
+        ax.yaxis.set_major_locator(plt.MaxNLocator(nbins=6,prune="both"))
         ax.tick_params(colors=TXT2,labelsize=11)
         for sp in ax.spines.values(): sp.set_color("#2a4060")
-        ax.grid(True,color="#1a3050",ls="--",alpha=0.5)
+        ax.set_ylabel(lbl,color=TXT2,fontsize=12)
+        title=f"Nokta Grafik — {lbl}"
+        if ref_val: title+=f"  |  Limit ±{pct:.0f}%"
+        ax.set_title(title,color=GOLD,fontsize=13,fontweight="bold")
+        ax.grid(True,axis="y",color="#1a3050",ls="--",alpha=0.5)
         hdls,_=ax.get_legend_handles_labels()
         if hdls:
-            n=len(hdls)
-            ax.legend(fontsize=max(9,12-max(0,n-6)),facecolor="#0e1525",
-                labelcolor="#d0e0f0",ncol=2 if n>6 else 1,framealpha=0.85)
-        fig.tight_layout(); self.lp_canvas.draw()
-
-    # ── APSD ──────────────────────────────────────────────────────────────────
-    def _plot_dist(self):
-        plt.close("all")
-        flow=int(self.flow_combo.currentText())
-        co=NGI_CUTOFFS[flow]
-        vis_all=["Throat"]+[s for s in GRAPH_STAGES if co.get(s,999)<900]
-        x_all=np.arange(len(vis_all))
-        lm={"ema":20,"fda":15,"usp":25}
-        try: pct=lm.get(self.limit_type) or float(self.e_lim_pct.text())
-        except: pct=20
-        fig=self.dist_canvas.figure; fig.clear(); fig.patch.set_facecolor(BG)
-        ax=fig.add_subplot(111); ax.set_facecolor("#0e1525")
-        ref_masses=None; warnings=[]
-        for sd in self._visible_series():
-            if not sd["avg"]: continue
-            ms=[sd["avg"]["avg_masses"].get(s,0) for s in vis_all]
-            vr=[r for r in sd["runs"] if "error" not in r]
-            sds=[]
-            for s in vis_all:
-                vals=[r["masses"].get(s,0) for r in vr]
-                sds.append(float(np.std(vals,ddof=1)) if len(vals)>1 else 0.0)
-            lw=3 if sd["is_ref"] else 1.8
-            ax.plot(x_all,ms,color=sd["color"],lw=lw,marker="o",
-                markersize=10 if sd["is_ref"] else 5,label=sd["name"],zorder=4)
-            ax.fill_between(x_all,[m-s for m,s in zip(ms,sds)],
-                [m+s for m,s in zip(ms,sds)],color=sd["color"],alpha=0.12,zorder=2)
-            ax.errorbar(x_all,ms,yerr=sds,fmt="none",
-                color=sd["color"],capsize=4,lw=1.5,alpha=0.5,zorder=3)
-            if sd["is_ref"]: ref_masses=sd["avg"]["avg_masses"]
-        if ref_masses:
-            rv=[ref_masses.get(s,0) for s in vis_all]
-            upper=[v*(1+pct/100) for v in rv]; lower=[v*(1-pct/100) for v in rv]
-            ax.plot(x_all,upper,"--",color="#FF6060",lw=1.8,alpha=0.8,label=f"+{pct:.0f}%")
-            ax.plot(x_all,lower,"--",color="#FF6060",lw=1.8,alpha=0.8,label=f"–{pct:.0f}%")
-            ax.fill_between(x_all,lower,upper,color="#FF6060",alpha=0.05,zorder=1)
-            for sd in self._visible_series():
-                if sd["is_ref"] or not sd["avg"]: continue
-                mt=[sd["avg"]["avg_masses"].get(s,0) for s in vis_all]
-                for s,tv,lo2,hi2 in zip(vis_all,mt,lower,upper):
-                    if tv<lo2 or tv>hi2:
-                        yon=("yuksek" if tv>hi2 else "dusuk") if self.lang=="TR" else ("high" if tv>hi2 else "low")
-                        lim_lbl="limit"
-                        warnings.append((f"{sd['name']} - {s}: {fmt_num(tv,4,self.T['dec_sep'])} ({yon}) {lim_lbl}",False,False))
-                f2=calc_f2(ref_masses,sd["avg"]["avg_masses"],co)
-                if f2 is not None:
-                    pf2=self.T["f2_pass"] if f2>=50 else self.T["f2_fail"]
-                    warnings.insert(0,(f"{self.T['f2_label']} {sd['name']}: f2={fmt_num(f2,1,self.T['dec_sep'])} ({pf2})",f2>=50,True))
-        ax.set_xticks(list(x_all))
-        ax.set_xticklabels(vis_all,rotation=20,ha="right",fontsize=12)
-        ax.tick_params(colors=TXT2,labelsize=11)
-        for sp in ax.spines.values(): sp.set_color("#2a4060")
-        ylbl="Ort. Kutle (mg/atis)" if self.lang=="TR" else "Mean Mass (mg/actuation)"
-        ax.set_xlabel(self.T["stage"],color=TXT2,fontsize=13)
-        ax.set_ylabel(ylbl,color=TXT2,fontsize=13)
-        ttl=f"APSD [{flow} L/min] Ort±SD"
-        if ref_masses: ttl+=f"  |  Limit ±{pct:.0f}%"
-        ax.set_title(ttl,color=GOLD,fontsize=13,fontweight="bold")
-        ax.grid(True,color="#1a3050",ls="--",alpha=0.5)
-        hdls,_=ax.get_legend_handles_labels()
-        if hdls:
-            n=len(hdls)
-            ax.legend(fontsize=max(9,12-max(0,n-6)),facecolor="#0e1525",
-                labelcolor="#d0e0f0",ncol=2 if n>6 else 1,framealpha=0.85,loc="upper right")
-        fig.tight_layout(); self.dist_canvas.draw()
-        for i in reversed(range(self.warn_layout.count())):
-            w=self.warn_layout.itemAt(i).widget()
-            if w: w.setParent(None)
-        if warnings:
-            self.warn_scroll.setVisible(True)
-            for item in warnings:
-                wt,is_pass,is_f2=item
-                if is_f2:
-                    bg="#0a2a0a" if is_pass else "#2a0a0a"
-                    tc="#90ee90" if is_pass else "#FF6060"
-                else:
-                    bg="#2a0a0a"; tc="#FFB0B0"
-                wl=QLabel(f"  {wt}")
-                wl.setStyleSheet(f"color:{tc};font-weight:bold;font-size:12px;"
-                    f"background:{bg};border-radius:3px;padding:3px 6px;")
-                self.warn_layout.addWidget(wl)
-        else:
-            self.warn_scroll.setVisible(False)
-
-    # ── Özet ──────────────────────────────────────────────────────────────────
-    def _show_summary(self):
-        for i in reversed(range(self.summary_layout.count()-1)):
-            w=self.summary_layout.itemAt(i).widget()
-            if w: w.setParent(None)
-        T=self.T; ds=T["dec_sep"]
-        try: rsd_lim=float(self.e_rsd.text())
-        except: rsd_lim=5.0
-        params_list=[("metered",T["metered"]),("delivered",T["delivered"]),
-                     ("fpd",T["fp_dose"]+" (5µm)"),("fpf",T["fp_frac"]+" (5µm)"),
-                     ("fpd3","FPD (3µm) [mg]"),("fpf3","FPF (3µm) [%]"),
-                     ("fpd15","FPD (1.5µm) [mg]"),("fpf15","FPF (1.5µm) [%]"),
-                     ("mmad","MMAD (um)"),("gsd","GSD"),
-                     ("slope",T["slope_lbl"]),("intercept",T["int_lbl"]),("r2",T["r2_lbl"])]
-        for sd in self.all_series:
-            rt=f"  [{T['ref_label']}]" if sd["is_ref"] else ""
-            sh=QLabel(f"▌ {sd['name']}{rt}")
-            sh.setStyleSheet(f"color:{sd['color']};font-size:14px;font-weight:bold;"
-                f"background:{BG2};border-left:3px solid {sd['color']};padding:4px 8px;")
-            self.summary_layout.insertWidget(self.summary_layout.count()-1,sh)
-            vr=[r for r in sd["runs"] if "error" not in r]
-            if not vr: continue
-            n=len(vr)
-            tf=QFrame(); tf.setStyleSheet("background:#111827;border-radius:4px;border:1px solid #1a2a40;")
-            tfl=QVBoxLayout(tf); tfl.setContentsMargins(2,2,2,2); tfl.setSpacing(1)
-            ws=[150]+[90]*n+[90,90,76,62]
-            hdrs=[T["param"]]+[f"Run {r['run_no']}" for r in vr]+[T["mean"],T["sd"],T["rsd"],T["accept"]]
-            hf=QFrame(); hf.setStyleSheet("background:#1F4E79;border-radius:2px;")
-            hfl=QHBoxLayout(hf); hfl.setContentsMargins(2,2,2,2); hfl.setSpacing(0)
-            for h,w in zip(hdrs,ws):
-                l=QLabel(h); l.setFixedWidth(w)
-                l.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                l.setStyleSheet("color:white;font-weight:bold;font-size:11px;background:transparent;")
-                hfl.addWidget(l)
-            hfl.addStretch(); tfl.addWidget(hf)
-            for i2,(key,lbl) in enumerate(params_list):
-                vals=[r.get(key) for r in vr if key in r]
-                if not vals: continue
-                mv=float(np.mean(vals)); sv=float(np.std(vals,ddof=1)) if len(vals)>1 else 0.0
-                rv2=sv/mv*100 if mv else 0.0; pf=rv2<=rsd_lim
-                ik=key in("fpd","fpf","mmad","gsd")
-                bg="#1a1a2a" if i2%2==0 else "transparent"
-                dr=QFrame(); dr.setStyleSheet(f"background:{bg};")
-                dfl=QHBoxLayout(dr); dfl.setContentsMargins(2,1,2,1); dfl.setSpacing(0)
-                l0=QLabel(lbl); l0.setFixedWidth(ws[0])
-                l0.setStyleSheet(f"color:{'#FFC600' if ik else '#c0d0e0'};"
-                    f"font-weight:{'bold' if ik else 'normal'};font-size:11px;background:transparent;")
-                dfl.addWidget(l0)
-                for r2 in vr:
-                    v=r2.get(key,0)
-                    l2=QLabel(fmt_num(v,4,ds)); l2.setFixedWidth(90)
-                    l2.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    l2.setStyleSheet("color:#d0e8ff;font-size:11px;background:transparent;")
-                    dfl.addWidget(l2)
-                for val,w in [(fmt_num(mv,4,ds),90),(fmt_num(sv,4,ds),90),(fmt_num(rv2,2,ds),76)]:
-                    l3=QLabel(val); l3.setFixedWidth(w)
-                    l3.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    l3.setStyleSheet("color:#d0e8ff;font-size:11px;background:transparent;")
-                    dfl.addWidget(l3)
-                pl=QLabel("OK" if pf else "FAIL"); pl.setFixedWidth(62)
-                pl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                pl.setStyleSheet(f"color:{'#90ee90' if pf else '#ff6060'};"
-                    "font-weight:bold;font-size:11px;background:transparent;")
-                dfl.addWidget(pl); dfl.addStretch(); tfl.addWidget(dr)
-            self.summary_layout.insertWidget(self.summary_layout.count()-1,tf)
-            dv=[r.get("delivered",0) for r in vr]
-            if dv:
-                dm=float(np.mean(dv)); ds2=float(np.std(dv,ddof=1)) if len(dv)>1 else 0.0
-                dr2=ds2/dm*100 if dm else 0.0
-                dl=QLabel(f"  {T['ddu_label']}: {T['mean']}={fmt_num(dm,4,ds)}mg  "
-                    f"{T['sd']}={fmt_num(ds2,4,ds)}  {T['rsd']}={fmt_num(dr2,2,ds)}%")
-                dl.setStyleSheet("color:#90ee90;font-size:12px;background:#1a2a1a;"
-                    "border-radius:4px;padding:4px 8px;")
-                self.summary_layout.insertWidget(self.summary_layout.count()-1,dl)
-
-    # ── Karşılaştırma ─────────────────────────────────────────────────────────
-    def _show_compare(self):
-        for i in reversed(range(self.compare_layout.count()-1)):
-            w=self.compare_layout.itemAt(i).widget()
-            if w: w.setParent(None)
-        T=self.T; ds=T["dec_sep"]
-        flow=int(self.flow_combo.currentText()); co=NGI_CUTOFFS[flow]
-        vis_ser=self._visible_series()
-        if len(vis_ser)>=2:
-            plt.close("all")
-            fig2=Figure(figsize=(9,3.2),facecolor=BG)
-            canvas2=FigureCanvas(fig2); canvas2.setMaximumHeight(260)
-            ax1=fig2.add_subplot(121); ax2=fig2.add_subplot(122)
-            ax1.set_facecolor("#0e1525"); ax2.set_facecolor("#0e1525")
-            vsd=[sd for sd in vis_ser if sd["avg"]]
-            names=[sd["name"] for sd in vsd]
-            mmads=[sd["avg"]["params"].get("mmad",(0,))[0] for sd in vsd]
-            gsds=[sd["avg"]["params"].get("gsd",(0,))[0] for sd in vsd]
-            clrs=[sd["color"] for sd in vsd]
-            xi=range(len(names))
-            for i,(m,g,c) in enumerate(zip(mmads,gsds,clrs)):
-                ax1.bar(i,m,color=c,alpha=0.85,width=0.6)
-                ax2.bar(i,g,color=c,alpha=0.85,width=0.6)
-            for ax,ttl in [(ax1,T["trend_mmad"]),(ax2,T["trend_gsd"])]:
-                ax.set_xticks(list(xi))
-                ax.set_xticklabels(names,rotation=20,ha="right",fontsize=9,color="#c0d8f0")
-                ax.set_title(ttl,color=GOLD,fontsize=11,fontweight="bold")
-                ax.tick_params(colors=TXT2)
-                for sp in ax.spines.values(): sp.set_color("#2a4060")
-                ax.grid(True,axis="y",color="#1a3050",ls="--",alpha=0.5)
-            fig2.tight_layout()
-            self.compare_layout.insertWidget(self.compare_layout.count()-1,canvas2)
-        ref_sd=next((sd for sd in vis_ser if sd["is_ref"]),None)
-        params_list=[("mmad","MMAD (um)"),("gsd","GSD"),
-                     ("fpd",T["fp_dose"]+" (5µm)"),("fpf",T["fp_frac"]+" (5µm)"),
-                     ("fpd3","FPD (3µm)"),("fpf3","FPF (3µm)"),
-                     ("fpd15","FPD (1.5µm)"),("fpf15","FPF (1.5µm)"),
-                     ("slope",T["slope_lbl"]),("intercept",T["int_lbl"]),("r2",T["r2_lbl"])]
-        tf=QFrame(); tf.setStyleSheet("background:#111827;border-radius:4px;border:1px solid #1a2a40;")
-        tfl=QVBoxLayout(tf); tfl.setContentsMargins(2,2,2,2); tfl.setSpacing(1)
-        n_ser=len(vis_ser); ws=[140]+[104]*n_ser
-        hdrs=[T["param"]]+[sd["name"]+(" ★" if sd["is_ref"] else "") for sd in vis_ser]
-        hf=QFrame(); hf.setStyleSheet("background:#1F4E79;border-radius:2px;")
-        hfl=QHBoxLayout(hf); hfl.setContentsMargins(2,2,2,2); hfl.setSpacing(0)
-        for h,w in zip(hdrs,ws):
-            l=QLabel(h); l.setFixedWidth(w)
-            l.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            l.setStyleSheet("color:white;font-weight:bold;font-size:11px;background:transparent;")
-            hfl.addWidget(l)
-        hfl.addStretch(); tfl.addWidget(hf)
-        for i2,(key,lbl) in enumerate(params_list):
-            bg="#1a1a2a" if i2%2==0 else "transparent"
-            dr=QFrame(); dr.setStyleSheet(f"background:{bg};")
-            dfl=QHBoxLayout(dr); dfl.setContentsMargins(2,1,2,1); dfl.setSpacing(0)
-            ik=key in("mmad","gsd","fpd","fpf")
-            l0=QLabel(lbl); l0.setFixedWidth(ws[0])
-            l0.setStyleSheet(f"color:{'#FFC600' if ik else '#c0d0e0'};"
-                f"font-weight:{'bold' if ik else 'normal'};font-size:11px;background:transparent;")
-            dfl.addWidget(l0)
-            rv=None
-            if ref_sd and ref_sd["avg"] and key in ref_sd["avg"]["params"]:
-                rv=ref_sd["avg"]["params"][key][0]
-            for sd in vis_ser:
-                if not sd["avg"] or key not in sd["avg"]["params"]:
-                    l2=QLabel("-"); l2.setFixedWidth(104)
-                    l2.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    l2.setStyleSheet("color:#888;font-size:11px;background:transparent;")
-                    dfl.addWidget(l2); continue
-                val=sd["avg"]["params"][key][0]; txt=fmt_num(val,4,ds); clr="#d0e8ff"
-                if rv and not sd["is_ref"] and rv>0:
-                    diff=(val-rv)/rv*100
-                    diff_str=fmt_num(abs(diff),1,ds); sign="+" if diff>=0 else "-"
-                    txt+=f"\n({sign}{diff_str}%)"
-                    clr="#90ee90" if abs(diff)<10 else "#FFB060" if abs(diff)<20 else "#FF6060"
-                l2=QLabel(txt); l2.setFixedWidth(104)
-                l2.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                l2.setStyleSheet(f"color:{clr};font-size:11px;background:transparent;")
-                dfl.addWidget(l2)
-            dfl.addStretch(); tfl.addWidget(dr)
-        self.compare_layout.insertWidget(self.compare_layout.count()-1,tf)
-        if ref_sd and ref_sd["avg"]:
-            f2h=QLabel(f"  {T['f2_label']}")
-            f2h.setStyleSheet(f"color:#FFD700;font-size:14px;font-weight:bold;"
-                f"background:{BG2};border-left:3px solid #FFD700;padding:4px 8px;")
-            self.compare_layout.insertWidget(self.compare_layout.count()-1,f2h)
-            lm={"ema":20,"fda":15,"usp":25}
-            try: pct=lm.get(self.limit_type) or float(self.e_lim_pct.text())
-            except: pct=20
-            for sd in vis_ser:
-                if sd["is_ref"] or not sd["avg"]: continue
-                f2=calc_f2(ref_sd["avg"]["avg_masses"],sd["avg"]["avg_masses"],co)
-                if f2 is None: continue
-                pf2=T["f2_pass"] if f2>=50 else T["f2_fail"]
-                clr="#90ee90" if f2>=50 else "#FF6060"
-                bg_f2="#0a2a0a" if f2>=50 else "#2a0a0a"
-                ff=QLabel(f"  {sd['name']}  f2 = {fmt_num(f2,1,ds)}   {pf2}")
-                ff.setStyleSheet(f"color:{clr};font-size:13px;font-weight:bold;"
-                    f"background:{bg_f2};border-radius:4px;padding:6px 8px;")
-                self.compare_layout.insertWidget(self.compare_layout.count()-1,ff)
-
-    # ── Dil ───────────────────────────────────────────────────────────────────
-    def _toggle_lang(self):
-        self.lang="EN" if self.lang=="TR" else "TR"
-        self.T=L[self.lang]; T=self.T
-        self.setWindowTitle(T["title"])
-        self.lbl_title.setText(T["title"]); self.lbl_sub.setText(T["subtitle"])
-        self.btn_lang.setText(T["lang_btn"])
-        self.btn_calc.setText(T["calculate"]); self.btn_clr.setText(T["clear"])
-        self.btn_pdf.setText(T["export_pdf"]); self.btn_csv.setText(T["load_csv"])
-        self.btn_add.setText("+ "+T["add_series"])
-        self.chk_lp_avg.setText(T["lp_avg_only"])
-        self.chk_delivered_tp.setText(T["delivered_tp"])
-        self._refresh_cutoffs()
-        for p in self.series_panels: p.update_lang(T)
-        for i,k in enumerate(["tab_scatter","tab_plot","tab_dist","tab_summary","tab_compare"]):
-            self.tabs.setTabText(i,T[k])
-        if self.all_series:
-            cur=self.tabs.currentIndex()
-            if cur==0: self._show_results()
-            elif cur==1: self._plot_lp()
-            elif cur==2: self._plot_dist()
-            elif cur==3: self._show_summary()
-            elif cur==4: self._show_compare()
-
-    # ── CSV ───────────────────────────────────────────────────────────────────
-    def _load_csv(self):
-        path,_=QFileDialog.getOpenFileName(self,"CSV Sec / Select CSV","",
-            "CSV (*.csv);;All Files (*.*)")
-        if not path: return
-        try: series_dict,flow,warnings=parse_csv(path)
-        except Exception as ex:
-            QMessageBox.critical(self,"CSV Hatasi",str(ex)); return
-        if series_dict is None:
-            QMessageBox.critical(self,"CSV Hatasi",
-                warnings[0] if warnings else "Okunamadi"); return
-        for w in warnings:
-            if w=="csv_err_flow":
-                QMessageBox.warning(self,"",self.T["csv_err_flow"])
-            elif w.startswith("csv_4runs__"):
-                QMessageBox.warning(self,"",self.T["csv_4runs"].format(
-                    s=w.replace("csv_4runs__","")))
-        has_ref=any(v["ref"] for v in series_dict.values())
-        if not has_ref:
-            dlg=QDialog(self); dlg.setWindowTitle(self.T["csv_ref_ask"])
-            dlg.setMinimumWidth(340); dlg.setStyleSheet(STYLE)
-            vl=QVBoxLayout(dlg)
-            vl.addWidget(QLabel(self.T["csv_ref_ask"]))
-            lst=QListWidget()
-            lst.setStyleSheet(f"background:{BG3};border:1px solid #2a4060;")
-            for name in list(series_dict.keys())+[self.T["csv_ref_none"]]:
-                lst.addItem(QListWidgetItem(name))
-            lst.setCurrentRow(0); vl.addWidget(lst)
-            btns=QDialogButtonBox(
-                QDialogButtonBox.StandardButton.Ok|
-                QDialogButtonBox.StandardButton.Cancel)
-            btns.accepted.connect(dlg.accept); btns.rejected.connect(dlg.reject)
-            vl.addWidget(btns)
-            if dlg.exec()==QDialog.DialogCode.Accepted:
-                sel=lst.currentItem().text() if lst.currentItem() else ""
-                if sel and sel!=self.T["csv_ref_none"]:
-                    for k in series_dict: series_dict[k]["ref"]=(k==sel)
-        if flow in NGI_CUTOFFS:
-            self.flow_combo.setCurrentText(str(flow)); self._on_flow(str(flow))
-        # Mevcut serileri temizle - setParent(None) ile
-        for p in self.series_panels: p.setParent(None)
-        self.series_panels.clear()
-        self.all_series=[]; self._clear_results()
-        # Yeni serileri yükle
-        for si,(name,data) in enumerate(series_dict.items()):
-            self._add_series()
-            p=self.series_panels[-1]
-            p.name_edit.setText(name)
-            if si==0 and p.ref_check:
-                p.ref_check.setChecked(data["ref"])
-            for ri,run_data in enumerate(data["runs"][:RUNS_PER_SER]):
-                p.set_masses(ri,run_data["masses"])
-        n_s=len(series_dict)
-        n_r=sum(len(v["runs"]) for v in series_dict.values())
-        self.status_lbl.setText(self.T["csv_loaded"].format(n=n_s,r=n_r))
-
-    # ── PDF ───────────────────────────────────────────────────────────────────
-    def _export_pdf(self):
-        if not self.all_series:
-            QMessageBox.warning(self,"","Oncelikle hesaplama yapiniz."); return
-        path,_=QFileDialog.getSaveFileName(self,"PDF Kaydet",
-            f"NGI_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.pdf","PDF (*.pdf)")
-        if not path: return
-        meta={"product":self.e_product.text(),"batch":self.e_batch.text(),
-              "operator":self.e_operator.text(),"date":self.e_date.text()}
-        lm={"ema":20,"fda":15,"usp":25}
-        try: pct=lm.get(self.limit_type) or float(self.e_lim_pct.text())
-        except: pct=20
-        try: rsd_lim=float(self.e_rsd.text())
-        except: rsd_lim=5.0
-        try:
-            make_pdf_multi(path,self.all_series,meta,
-                int(self.flow_combo.currentText()),
-                self.T,pct,rsd_lim,lang=self.lang)
-            import subprocess,platform
-            try:
-                if platform.system()=="Windows": os.startfile(path)
-                elif platform.system()=="Darwin": subprocess.Popen(["open",path])
-                else: subprocess.Popen(["xdg-open",path])
-            except: pass
-            QMessageBox.information(self,"",f"PDF kaydedildi:\n{path}")
-        except Exception as ex:
-            import traceback
-            QMessageBox.critical(self,"PDF Hatasi",
-                str(ex)+"\n\n"+traceback.format_exc()[-600:])
-
-
+            ax.legend(fontsize=9,facecolor="#0e1525",labelcolor="#d0e0f0",
+                framealpha=0.85,loc="upper right")
+        fig.tight_layout(); self.scatter_canvas.draw()
 def make_pdf_multi(path, all_series, meta, flow, T, limit_pct=20, rsd_lim=5.0, lang="TR"):
     from reportlab.lib.pagesizes import A4
     from reportlab.lib import colors
@@ -2297,8 +1901,11 @@ def make_pdf_multi(path, all_series, meta, flow, T, limit_pct=20, rsd_lim=5.0, l
             ps(7,True,colors.black)))
         story.append(Spacer(1,1*mm))
         pkeys = [("metered","Metered [mg]"),("delivered","Delivered [mg]"),
-                 ("fpd","FPD [mg]"),("fpf","FPF [%]"),
+                 ("fpd","FPD 5µm [mg]"),("fpf","FPF 5µm [%]"),
+                 ("fpd3","FPD 3µm [mg]"),("fpf3","FPF 3µm [%]"),
+                 ("fpd15","FPD 1.5µm [mg]"),("fpf15","FPF 1.5µm [%]"),
                  ("mmad","MMAD [um]"),("gsd","GSD"),
+                 ("d10","D10 [um]"),("d50","D50 [um]"),("d90","D90 [um]"),
                  ("slope","Slope"),("intercept","Intercept"),("r2","R^2")]
         p_hdr2 = ([Paragraph("Parameter",sLbl)] +
                   [Paragraph(f"Run {r['run_no']}",sLbl) for r in valid_runs] +
@@ -2311,7 +1918,7 @@ def make_pdf_multi(path, all_series, meta, flow, T, limit_pct=20, rsd_lim=5.0, l
             mean2=float(np.mean(vals2))
             sd2=float(np.std(vals2,ddof=1)) if len(vals2)>1 else 0.0
             rsd2=sd2/mean2*100 if mean2 else 0.0
-            is_key = k in ("fpd","fpf","mmad","gsd")
+            is_key = k in ("fpd","fpf","fpd3","fpf3","fpd15","fpf15","mmad","gsd","d10","d50","d90")
             sv = ps(7,True,colors.black,TA_CENTER) if is_key else sVal
             rsd_style = sRed if rsd2 > rsd_lim else sVal
             p_rows2.append(
@@ -2435,6 +2042,9 @@ def make_pdf_multi(path, all_series, meta, flow, T, limit_pct=20, rsd_lim=5.0, l
     # Log-Probit alti: MMAD degerleri tablosu
     mmad_rows = [[Paragraph("Series", sLbl),
                   Paragraph("MMAD [um]", sLbl),
+                  Paragraph("D10 [um]", sLbl),
+                  Paragraph("D50 [um]", sLbl),
+                  Paragraph("D90 [um]", sLbl),
                   Paragraph("GSD", sLbl),
                   Paragraph("Slope", sLbl),
                   Paragraph("Intercept", sLbl),
@@ -2505,18 +2115,77 @@ def make_pdf_multi(path, all_series, meta, flow, T, limit_pct=20, rsd_lim=5.0, l
     story.append(HRFlowable(width="100%", thickness=0.8, color=colors.black))
     story.append(Paragraph(
         f"NGI Analysis Tool v5  |  Ph.Eur 2.9.18 / USP &lt;601&gt;  |  "
-        f"Generated: {datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}",
+        f"Generated: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
         ps(6.5, False, colors.black, TA_CENTER)))
 
     doc.build(story)
 
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
+class SplashScreen(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowFlags(
+            Qt.WindowType.SplashScreen |
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedSize(540, 300)
+        self._build(); self._center()
+
+    def _center(self):
+        from PyQt6.QtGui import QGuiApplication
+        screen=QGuiApplication.primaryScreen().geometry()
+        self.move((screen.width()-self.width())//2,(screen.height()-self.height())//2)
+
+    def _build(self):
+        vl=QVBoxLayout(self); vl.setContentsMargins(0,0,0,0)
+        card=QFrame(self)
+        card.setStyleSheet("""
+            QFrame{background:#002D62;border-radius:14px;
+                   border:1px solid rgba(255,198,0,0.35);}
+        """)
+        cl=QVBoxLayout(card); cl.setSpacing(10); cl.setContentsMargins(40,32,40,28)
+        t1=QLabel("NGI İmpaktor"); t1.setStyleSheet(
+            "color:#FFC600;font-size:30px;font-weight:bold;background:transparent;border:none;")
+        t1.setAlignment(Qt.AlignmentFlag.AlignCenter); cl.addWidget(t1)
+        t2=QLabel("Analiz Aracı"); t2.setStyleSheet(
+            "color:white;font-size:26px;font-weight:bold;background:transparent;border:none;")
+        t2.setAlignment(Qt.AlignmentFlag.AlignCenter); cl.addWidget(t2)
+        t3=QLabel("Ph.Eur 2.9.18 / USP <601> · CITDAS Doğrulamalı")
+        t3.setStyleSheet("color:#6a9ec0;font-size:11px;background:transparent;border:none;")
+        t3.setAlignment(Qt.AlignmentFlag.AlignCenter); cl.addWidget(t3)
+        cl.addSpacing(14)
+        self.progress=QProgressBar(); self.progress.setRange(0,100)
+        self.progress.setValue(0); self.progress.setTextVisible(False)
+        self.progress.setFixedHeight(4)
+        self.progress.setStyleSheet("""
+            QProgressBar{background:rgba(255,255,255,0.1);border-radius:2px;border:none;}
+            QProgressBar::chunk{background:#FFC600;border-radius:2px;}
+        """); cl.addWidget(self.progress)
+        self.status_lbl=QLabel("Başlatılıyor...")
+        self.status_lbl.setStyleSheet(
+            "color:#5a8ab0;font-size:10px;background:transparent;border:none;")
+        self.status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        cl.addWidget(self.status_lbl); vl.addWidget(card)
+        self._val=0
+        self._msgs=[(20,"Kütüphaneler yüklüyor..."),(50,"Arayüz hazırlanıyor..."),
+                    (80,"Hesaplama motoru..."),(100,"Hazır.")]
+        self._timer=QTimer(self); self._timer.timeout.connect(self._tick)
+        self._timer.start(35)
+
+    def _tick(self):
+        self._val=min(self._val+2,100); self.progress.setValue(self._val)
+        for th,msg in self._msgs:
+            if self._val>=th: self.status_lbl.setText(msg)
+        if self._val>=100: self._timer.stop()
+
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
+    app=QApplication(sys.argv)
     app.setApplicationName("NGI Impactor Analysis")
-    win = NGIApp()
-    win.show()
+    splash=SplashScreen(); splash.show(); app.processEvents()
+    win=NGIApp()
+    QTimer.singleShot(2400,splash.close)
+    QTimer.singleShot(2400,win.show)
     sys.exit(app.exec())
