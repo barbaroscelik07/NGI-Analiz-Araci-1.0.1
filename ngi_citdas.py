@@ -873,220 +873,190 @@ class NGIApp(QMainWindow):
 
     def _build_left(self, layout):
         layout.setSpacing(0)
+        layout.setContentsMargins(0,0,0,0)
 
-        # ── Analiz Bilgileri bölümü ───────────────────────────────────────────
-        self.sec_meta = self._make_section(layout,
-            "ti-file-description", "Analiz Bilgileri", expanded=True)
-        meta_w = QWidget(); meta_l = QFormLayout(meta_w)
-        meta_l.setSpacing(5); meta_l.setContentsMargins(10,6,10,8)
-        meta_l.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        self.e_product  = QLineEdit(); meta_l.addRow(self.T["product"],  self.e_product)
-        self.e_batch    = QLineEdit(); meta_l.addRow(self.T["batch"],    self.e_batch)
-        self.e_operator = QLineEdit(); meta_l.addRow(self.T["operator"], self.e_operator)
-        self.e_date     = QLineEdit(datetime.datetime.now().strftime("%d.%m.%Y"))
-        meta_l.addRow(self.T["date"], self.e_date)
-        self.sec_meta["body"].addWidget(meta_w)
+        # ── Accordion: Analiz Bilgileri ───────────────────────────────────────
+        self._acc_meta = self._acc_section(layout, "◉  Analiz Bilgileri", True)
+        meta_w = QWidget()
+        meta_w.setStyleSheet(f"background:{BG};")
+        ml = QFormLayout(meta_w)
+        ml.setSpacing(5); ml.setContentsMargins(12,6,12,8)
+        ml.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        self.e_product  = QLineEdit(); ml.addRow(self.T["product"],  self.e_product)
+        self.e_batch    = QLineEdit(); ml.addRow(self.T["batch"],    self.e_batch)
+        self.e_operator = QLineEdit(); ml.addRow(self.T["operator"], self.e_operator)
+        self.e_date = QLineEdit(datetime.datetime.now().strftime("%d.%m.%Y"))
+        ml.addRow(self.T["date"], self.e_date)
+        self._acc_meta["body"].addWidget(meta_w)
 
-        # ── Akış & Parametreler bölümü ────────────────────────────────────────
-        self.sec_flow = self._make_section(layout,
-            "ti-adjustments-horizontal", "Akis & Parametreler", expanded=True)
-        flow_w = QWidget(); flow_l = QVBoxLayout(flow_w)
-        flow_l.setSpacing(5); flow_l.setContentsMargins(10,4,10,8)
+        # ── Accordion: Akış & Parametreler ───────────────────────────────────
+        self._acc_flow = self._acc_section(layout, "⚙  Akis & Parametreler", True)
+        flow_w = QWidget()
+        flow_w.setStyleSheet(f"background:{BG};")
+        fl = QVBoxLayout(flow_w)
+        fl.setSpacing(6); fl.setContentsMargins(12,6,12,10)
 
-        # Flow satırı
-        fr = QHBoxLayout(); fr.setSpacing(6)
-        lbl_fr = QLabel(self.T["flow_rate"])
-        lbl_fr.setStyleSheet(f"color:{GOLD};font-weight:bold;background:transparent;")
-        fr.addWidget(lbl_fr)
+        r1 = QHBoxLayout(); r1.setSpacing(6)
+        lf = QLabel(self.T["flow_rate"])
+        lf.setStyleSheet(f"color:{GOLD};font-weight:bold;background:transparent;")
+        r1.addWidget(lf)
         self.flow_combo = QComboBox()
-        for fl in sorted(NGI_CUTOFFS.keys()):
-            self.flow_combo.addItem(str(fl))
+        for fv in sorted(NGI_CUTOFFS.keys()):
+            self.flow_combo.addItem(str(fv))
         self.flow_combo.setCurrentText("60")
-        self.flow_combo.setFixedWidth(70)
+        self.flow_combo.setFixedWidth(72)
         self.flow_combo.currentTextChanged.connect(self._on_flow)
-        fr.addWidget(self.flow_combo)
-        fr.addWidget(QLabel("L/min"))
-        flow_l.addLayout(fr)
+        r1.addWidget(self.flow_combo)
+        r1.addWidget(QLabel("L/min"))
+        r1.addStretch()
+        fl.addLayout(r1)
 
-        # Geçerlilik satırı
-        vr = QHBoxLayout(); vr.setSpacing(4)
-        vr.addWidget(QLabel(self.T["valid_range"]))
+        r2 = QHBoxLayout(); r2.setSpacing(4)
+        r2.addWidget(QLabel(self.T["valid_range"]))
         self.e_lo = QLineEdit("15"); self.e_lo.setFixedWidth(48)
-        vr.addWidget(self.e_lo)
-        vr.addWidget(QLabel("–"))
+        r2.addWidget(self.e_lo)
+        r2.addWidget(QLabel("–"))
         self.e_hi = QLineEdit("85"); self.e_hi.setFixedWidth(48)
-        vr.addWidget(self.e_hi)
-        vr.addStretch()
-        flow_l.addLayout(vr)
+        r2.addWidget(self.e_hi)
+        r2.addStretch()
+        fl.addLayout(r2)
 
-        # RSD + Delivered
-        or_ = QHBoxLayout(); or_.setSpacing(6)
-        or_.addWidget(QLabel(self.T["rsd_limit"]))
+        r3 = QHBoxLayout(); r3.setSpacing(6)
+        r3.addWidget(QLabel(self.T["rsd_limit"]))
         self.e_rsd = QLineEdit("5"); self.e_rsd.setFixedWidth(40)
-        or_.addWidget(self.e_rsd)
-        or_.addWidget(QLabel("%"))
+        r3.addWidget(self.e_rsd)
+        r3.addWidget(QLabel("%"))
         self.chk_delivered_tp = QCheckBox(self.T["delivered_tp"])
-        or_.addWidget(self.chk_delivered_tp)
-        or_.addStretch()
-        flow_l.addLayout(or_)
+        self.chk_delivered_tp.setStyleSheet("font-size:11px;")
+        r3.addWidget(self.chk_delivered_tp)
+        r3.addStretch()
+        fl.addLayout(r3)
 
-        # Cut-off
+        # Cut-off kutuları
         co_w = QWidget()
         co_w.setStyleSheet(f"background:#111827;border-radius:4px;")
         self.cbox_layout = QHBoxLayout(co_w)
         self.cbox_layout.setContentsMargins(6,3,6,3); self.cbox_layout.setSpacing(3)
-        flow_l.addWidget(co_w)
         self.cbox = co_w
+        fl.addWidget(co_w)
+        self._acc_flow["body"].addWidget(flow_w)
         self._refresh_cutoffs()
-        self.sec_flow["body"].addWidget(flow_w)
 
-        # ── Seriler bölümü ────────────────────────────────────────────────────
-        self.sec_series = self._make_section(layout,
-            "ti-chart-dots", "Seriler (0)", expanded=True)
+        # ── Accordion: Seriler ────────────────────────────────────────────────
+        self._acc_ser = self._acc_section(layout, "◈  Seriler (0)", True)
 
-        # Buton satırı 1
-        bf1 = QHBoxLayout(); bf1.setSpacing(4); bf1.setContentsMargins(10,4,10,2)
-        self.btn_add = QPushButton(self.T["add_series"])
+        # Buton satır 1
+        bw1 = QWidget(); bw1.setStyleSheet(f"background:{BG};")
+        bl1 = QHBoxLayout(bw1); bl1.setSpacing(4); bl1.setContentsMargins(10,4,10,2)
+        self.btn_add  = QPushButton(self.T["add_series"])
         self.btn_add.setFixedHeight(30); self.btn_add.clicked.connect(self._add_series)
-        bf1.addWidget(self.btn_add)
+        bl1.addWidget(self.btn_add)
         self.btn_calc = QPushButton(self.T["calculate"])
         self.btn_calc.setObjectName("btn_calc"); self.btn_calc.setFixedHeight(30)
-        self.btn_calc.clicked.connect(self._calculate); bf1.addWidget(self.btn_calc)
-        self.btn_clr = QPushButton(self.T["clear"])
+        self.btn_calc.clicked.connect(self._calculate); bl1.addWidget(self.btn_calc)
+        self.btn_clr  = QPushButton(self.T["clear"])
         self.btn_clr.setObjectName("btn_clr"); self.btn_clr.setFixedHeight(30)
-        self.btn_clr.clicked.connect(self._clear); bf1.addWidget(self.btn_clr)
-        btn_w1 = QWidget(); btn_w1.setLayout(bf1)
-        self.sec_series["body"].addWidget(btn_w1)
+        self.btn_clr.clicked.connect(self._clear); bl1.addWidget(self.btn_clr)
+        self._acc_ser["body"].addWidget(bw1)
 
-        # Buton satırı 2
-        bf2 = QHBoxLayout(); bf2.setSpacing(4); bf2.setContentsMargins(10,0,10,4)
+        # Buton satır 2
+        bw2 = QWidget(); bw2.setStyleSheet(f"background:{BG};")
+        bl2 = QHBoxLayout(bw2); bl2.setSpacing(4); bl2.setContentsMargins(10,0,10,4)
         self.btn_pdf = QPushButton(self.T["export_pdf"])
         self.btn_pdf.setObjectName("btn_pdf"); self.btn_pdf.setFixedHeight(30)
-        self.btn_pdf.clicked.connect(self._export_pdf); bf2.addWidget(self.btn_pdf)
+        self.btn_pdf.clicked.connect(self._export_pdf); bl2.addWidget(self.btn_pdf)
         self.btn_csv = QPushButton(self.T["load_csv"])
         self.btn_csv.setObjectName("btn_csv"); self.btn_csv.setFixedHeight(30)
-        self.btn_csv.clicked.connect(self._load_csv); bf2.addWidget(self.btn_csv)
-        btn_w2 = QWidget(); btn_w2.setLayout(bf2)
-        self.sec_series["body"].addWidget(btn_w2)
+        self.btn_csv.clicked.connect(self._load_csv); bl2.addWidget(self.btn_csv)
+        self._acc_ser["body"].addWidget(bw2)
 
         # Tümünü seç/gizle
-        sel_row = QHBoxLayout(); sel_row.setSpacing(4); sel_row.setContentsMargins(10,0,10,4)
-        self.btn_sel_all = QPushButton("Tumunu Sec")
+        sw = QWidget(); sw.setStyleSheet(f"background:{BG};")
+        sl = QHBoxLayout(sw); sl.setSpacing(4); sl.setContentsMargins(10,0,10,4)
+        self.btn_sel_all  = QPushButton("Tumunu Sec")
         self.btn_sel_all.setFixedHeight(24)
-        self.btn_sel_all.setStyleSheet("font-size:11px;padding:2px 8px;")
+        self.btn_sel_all.setStyleSheet("font-size:11px;")
         self.btn_sel_all.clicked.connect(self._select_all_series)
-        sel_row.addWidget(self.btn_sel_all)
+        sl.addWidget(self.btn_sel_all)
         self.btn_sel_none = QPushButton("Tumunu Gizle")
         self.btn_sel_none.setFixedHeight(24)
-        self.btn_sel_none.setStyleSheet("font-size:11px;padding:2px 8px;background:#3a1a1a;")
+        self.btn_sel_none.setStyleSheet("font-size:11px;background:#3a1a1a;")
         self.btn_sel_none.clicked.connect(self._deselect_all_series)
-        sel_row.addWidget(self.btn_sel_none)
-        sel_row.addStretch()
-        sel_w = QWidget(); sel_w.setLayout(sel_row)
-        self.sec_series["body"].addWidget(sel_w)
+        sl.addWidget(self.btn_sel_none)
+        sl.addStretch()
+        self._acc_ser["body"].addWidget(sw)
 
-        # Seri listesi scroll
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setMinimumHeight(200)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet(f"background:{BG2};border:none;")
+        # Seri scroll listesi
+        self.series_scroll = QScrollArea()
+        self.series_scroll.setWidgetResizable(True)
+        self.series_scroll.setMinimumHeight(120)
+        self.series_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.series_scroll.setStyleSheet(f"background:{BG2};border:none;")
         self.series_container = QWidget()
         self.series_container.setStyleSheet(f"background:{BG2};")
         self.series_layout = QVBoxLayout(self.series_container)
         self.series_layout.setSpacing(3)
-        self.series_layout.setContentsMargins(6,4,6,4)
+        self.series_layout.setContentsMargins(4,4,4,4)
         self.series_layout.addStretch()
-        scroll.setWidget(self.series_container)
-        self.sec_series["body"].addWidget(scroll)
+        self.series_scroll.setWidget(self.series_container)
+        self._acc_ser["body"].addWidget(self.series_scroll)
 
-        layout.addStretch()
-
-    def _make_section(self, parent_layout, icon, title, expanded=True):
-        """Accordion bölümü oluştur"""
-        frame = QFrame()
-        frame.setStyleSheet(f"""
-            QFrame#sec_outer {{
-                background:{BG2};
-                border-bottom: 0.5px solid #1a2a40;
+    def _acc_section(self, parent_layout, title, expanded=True):
+        """Accordion bölümü: başlık butonu + katlanabilir içerik"""
+        outer = QFrame()
+        outer.setStyleSheet(f"""
+            QFrame {{
+                background: {BG2};
+                border-bottom: 1px solid #1a2a40;
             }}
         """)
-        frame.setObjectName("sec_outer")
-        vl = QVBoxLayout(frame); vl.setSpacing(0); vl.setContentsMargins(0,0,0,0)
+        vl = QVBoxLayout(outer); vl.setSpacing(0); vl.setContentsMargins(0,0,0,0)
 
-        # Başlık butonu
-        hdr_btn = QPushButton()
-        hdr_btn.setCheckable(True)
-        hdr_btn.setChecked(expanded)
-        hdr_btn.setStyleSheet(f"""
+        # Başlık
+        btn = QPushButton(("▾  " if expanded else "▸  ") + title)
+        btn.setCheckable(True); btn.setChecked(expanded)
+        btn.setStyleSheet(f"""
             QPushButton {{
-                background:{BG3};
-                border:none;
-                border-bottom: 0.5px solid #1a2a40;
-                text-align:left;
+                background: {BG3};
+                border: none;
+                border-bottom: 1px solid #1a2a40;
+                text-align: left;
                 padding: 9px 14px;
                 color: #c0d8f0;
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: bold;
             }}
-            QPushButton:hover {{ background:#1f2d4a; }}
-            QPushButton:checked {{ background:{NAVY2}; }}
+            QPushButton:hover {{ background: #1f2d4a; }}
+            QPushButton:checked {{ border-left: 3px solid {GOLD}; color: {GOLD}; background: {NAVY2}; }}
         """)
+        vl.addWidget(btn)
 
-        hdr_inner = QHBoxLayout()
-        hdr_inner.setContentsMargins(0,0,0,0); hdr_inner.setSpacing(8)
-        icon_lbl = QLabel(f'<i class="ti {icon}"></i>')
-        icon_lbl.setStyleSheet(f"color:{GOLD};font-size:14px;background:transparent;")
-        # QLabel HTML render yerine text tabanlı ikon - basit unicode alternatif
-        icon_map = {
-            "ti-file-description": "📋",
-            "ti-adjustments-horizontal": "⚙",
-            "ti-chart-dots": "◉",
-        }
-        ico_char = icon_map.get(icon, "▸")
-        ico_lbl = QLabel(ico_char)
-        ico_lbl.setStyleSheet(f"color:{GOLD};font-size:13px;background:transparent;border:none;")
-        hdr_inner.addWidget(ico_lbl)
-        self._sec_title_label = QLabel(title)
-        sec_lbl = QLabel(title)
-        sec_lbl.setStyleSheet("color:#c0d8f0;font-size:12px;font-weight:bold;background:transparent;border:none;")
-        hdr_inner.addWidget(sec_lbl)
-        hdr_inner.addStretch()
-        arr_lbl = QLabel("▾")
-        arr_lbl.setStyleSheet("color:#5a8ab0;font-size:10px;background:transparent;border:none;")
-        hdr_inner.addWidget(arr_lbl)
+        # İçerik
+        body_w = QWidget()
+        body_w.setStyleSheet(f"background:{BG};border:none;")
+        body_l = QVBoxLayout(body_w)
+        body_l.setSpacing(0); body_l.setContentsMargins(0,0,0,0)
+        body_w.setVisible(expanded)
+        vl.addWidget(body_w)
 
-        hdr_widget = QWidget(); hdr_widget.setLayout(hdr_inner)
-        hdr_widget.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-
-        hdr_btn_layout = QVBoxLayout(hdr_btn)
-        hdr_btn_layout.setContentsMargins(0,0,0,0)
-        hdr_btn_layout.addWidget(hdr_widget)
-        vl.addWidget(hdr_btn)
-
-        # İçerik alanı
-        body_widget = QWidget()
-        body_widget.setStyleSheet(f"background:{BG};")
-        body_layout = QVBoxLayout(body_widget)
-        body_layout.setSpacing(0); body_layout.setContentsMargins(0,0,0,0)
-        body_widget.setVisible(expanded)
-        vl.addWidget(body_widget)
-
-        # Toggle bağlantısı
-        def toggle(checked, bw=body_widget, al=arr_lbl):
+        def _toggle(checked, bw=body_w, b=btn, t=title):
             bw.setVisible(checked)
-            al.setText("▾" if checked else "▸")
-        hdr_btn.toggled.connect(toggle)
+            prefix = "▾  " if checked else "▸  "
+            b.setText(prefix + t)
 
-        parent_layout.addWidget(frame)
-        return {"frame": frame, "header": hdr_btn, "body": body_layout,
-                "title_lbl": sec_lbl}
+        btn.toggled.connect(_toggle)
+        parent_layout.addWidget(outer)
+        return {"outer": outer, "btn": btn, "body": body_l, "title": title}
 
     def _update_series_count(self):
-        """Seriler bölüm başlığını güncelle"""
         n = len(self.series_panels)
+        lbl = "Seriler" if self.lang=="TR" else "Series"
+        new_title = f"{lbl} ({n})"
         try:
-            self.sec_series["title_lbl"].setText(f"Seriler ({n})")
+            self._acc_ser["title"] = new_title
+            prefix = "▾  " if self._acc_ser["btn"].isChecked() else "▸  "
+            self._acc_ser["btn"].setText(prefix + new_title)
         except: pass
 
 
@@ -1815,10 +1785,7 @@ class NGIApp(QMainWindow):
         for i, k in enumerate(tab_keys):
             self.tabs.setTabText(i, T[k])
         # Accordion bölüm label'larını güncelle
-        try:
-            self.sec_series["title_lbl"].setText(
-                f"{'Seriler' if self.lang=='TR' else 'Series'} ({len(self.series_panels)})")
-        except: pass
+        self._update_series_count()
         self.btn_sel_all.setText("Tumunu Sec" if self.lang=="TR" else "Select All")
         self.btn_sel_none.setText("Tumunu Gizle" if self.lang=="TR" else "Hide All")
         # Mevcut sonuçları yeniden render
