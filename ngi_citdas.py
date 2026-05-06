@@ -104,16 +104,27 @@ def calc_run(masses, flow, lo=15, hi=85, delivered_tp=False):
         return 10**((tz-a)/b)
     d84=get_d(84.13,1.0); d16=get_d(15.87,-1.0)
     gsd=math.sqrt(d84/d16) if (d84 and d16 and d16>0) else 10**(1/b)
-    d5u=None
-    for i in range(len(pts_all)-1):
-        d1,u1=pts_all[i]; d2,u2=pts_all[i+1]
-        if d1<=5<=d2 and d2>d1:
-            t=(math.log10(5)-math.log10(d1))/(math.log10(d2)-math.log10(d1))
-            d5u=u1+t*(u2-u1); break
-    if d5u is None: d5u=norm.cdf(a+b*math.log10(5))*100
-    fpd=d5u/100*ism; fpf=fpd/metered*100 if metered>0 else 0
+    def _interp_at(d_cut):
+        """Cumulative % at given cutoff diameter via log interpolation"""
+        for i in range(len(pts_all)-1):
+            d1,u1=pts_all[i]; d2,u2=pts_all[i+1]
+            if d1<=d_cut<=d2 and d2>d1:
+                t=(math.log10(d_cut)-math.log10(d1))/(math.log10(d2)-math.log10(d1))
+                return u1+t*(u2-u1)
+        return norm.cdf(a+b*math.log10(d_cut))*100
+
+    d5u  = _interp_at(5.0)
+    d3u  = _interp_at(3.0)
+    d15u = _interp_at(1.5)
+    fpd   = d5u /100*ism; fpf   = fpd /metered*100 if metered>0 else 0
+    fpd3  = d3u /100*ism; fpf3  = fpd3/metered*100 if metered>0 else 0
+    fpd15 = d15u/100*ism; fpf15 = fpd15/metered*100 if metered>0 else 0
     res.update({"n":len(valid),"a":a,"b":b,"slope":b,"intercept":a+5,"r2":r2,
-                "mmad":mmad,"gsd":gsd,"fpd":fpd,"fpf":fpf,"x_reg":x,"y_reg":y})
+                "mmad":mmad,"gsd":gsd,
+                "fpd":fpd,"fpf":fpf,
+                "fpd3":fpd3,"fpf3":fpf3,
+                "fpd15":fpd15,"fpf15":fpf15,
+                "x_reg":x,"y_reg":y})
     return res
 
 def calc_series_avg(runs):
@@ -124,7 +135,7 @@ def calc_series_avg(runs):
         vals=[r["masses"].get(s,0) for r in valid]
         avg_masses[s]=float(np.mean(vals))
     params={}
-    for p in ["mmad","gsd","fpd","fpf","metered","delivered","slope","intercept","r2"]:
+    for p in ["mmad","gsd","fpd","fpf","fpd3","fpf3","fpd15","fpf15","metered","delivered","slope","intercept","r2"]:
         vals=[r[p] for r in valid if p in r]
         if vals:
             m=float(np.mean(vals)); sd=float(np.std(vals,ddof=1)) if len(vals)>1 else 0.0
@@ -215,7 +226,7 @@ L = {
  "add_series":"+ Seri Ekle","del_series":"Seri Sil",
  "calculate":"Hesapla","clear":"Temizle","export_pdf":"PDF Rapor",
  "load_csv":"CSV Yukle",
- "tab_results":"Sonuclar","tab_plot":"Log-Probit",
+ "tab_scatter":"Nokta Grafik","tab_plot":"Log-Probit",
  "tab_dist":"Dagilim","tab_summary":"Ozet","tab_compare":"Karsilastirma",
  "series":"Seri","run":"Run","paste_btn":"Yapistir",
  "mean":"Ort.","sd":"SD","rsd":"RSD%","accept":"Kabul",
@@ -249,7 +260,7 @@ L = {
  "add_series":"+ Add Series","del_series":"Del Series",
  "calculate":"Calculate","clear":"Clear","export_pdf":"PDF Report",
  "load_csv":"Load CSV",
- "tab_results":"Results","tab_plot":"Log-Probit",
+ "tab_scatter":"Scatter Plot","tab_plot":"Log-Probit",
  "tab_dist":"Distribution","tab_summary":"Summary","tab_compare":"Compare",
  "series":"Series","run":"Run","paste_btn":"Paste",
  "mean":"Mean","sd":"SD","rsd":"RSD%","accept":"Accept",
@@ -626,7 +637,17 @@ class SeriesPanel(QFrame):
         super().__init__(parent)
         self.idx=idx; self.color=color; self.T=T
         self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setStyleSheet(f"background:{BG2};border-bottom:0.5px solid #1a2a40;")
+        self.setStyleSheet("""
+            QFrame {
+                background: rgba(255,255,255,0.04);
+                border: 0.5px solid rgba(255,255,255,0.08);
+                border-radius: 6px;
+            }
+            QFrame:hover {
+                background: rgba(255,255,255,0.06);
+                border: 0.5px solid rgba(255,198,0,0.2);
+            }
+        """)
         self.setFixedHeight(36)
         self.entries=[{s:QLineEdit("0.000") for s in DISP_STAGES}
                        for _ in range(RUNS_PER_SER)]
@@ -731,6 +752,7 @@ class NGIApp(QMainWindow):
         self.all_series=[]; self.series_panels=[]
         self.flow=60; self.limit_type="ema"
         self.calc_thread=None
+        self._sc_ser_checks = {}
         self._setup(); self._build_ui()
         self._add_series()
 
@@ -784,150 +806,251 @@ class NGIApp(QMainWindow):
         return h
 
     def _build_left(self, layout):
-        # Seçenek C — Minimal & Kompakt sol panel
-        # Tüm sol panel tek scroll area içinde
+        layout.setSpacing(0); layout.setContentsMargins(0,0,0,0)
+        # Tüm sol panel scroll
         scroll=QScrollArea(); scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet(f"background:{BG2};border:none;")
-        inner=QWidget(); inner.setStyleSheet(f"background:{BG2};")
-        vl=QVBoxLayout(inner); vl.setSpacing(0); vl.setContentsMargins(0,0,0,0)
+        scroll.setStyleSheet("background:#0d1117;border:none;")
+        inner=QWidget(); inner.setStyleSheet("background:#0d1117;")
+        vl=QVBoxLayout(inner); vl.setSpacing(6); vl.setContentsMargins(8,8,8,8)
 
-        # ── Analiz Bilgileri ─────────────────────────────────────────────────
-        def sec_title(txt):
-            l=QLabel(txt)
-            l.setStyleSheet(f"color:{TXT2};font-size:10px;font-weight:500;"
-                f"padding:6px 12px 3px;background:{BG2};"
-                f"letter-spacing:0.05em;text-transform:uppercase;")
-            return l
+        # ── Glassmorphic bölüm yardımcısı ────────────────────────────────────
+        def glass_section(icon_char, title, expanded=True):
+            outer=QFrame()
+            outer.setStyleSheet("""
+                QFrame {
+                    background: rgba(255,255,255,0.04);
+                    border: 0.5px solid rgba(255,255,255,0.09);
+                    border-radius: 8px;
+                }
+            """)
+            vbox=QVBoxLayout(outer); vbox.setSpacing(0); vbox.setContentsMargins(0,0,0,0)
+            # Başlık
+            hdr_btn=QPushButton()
+            hdr_btn.setCheckable(True); hdr_btn.setChecked(expanded)
+            hdr_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background: rgba(255,255,255,0.0);
+                    border: none;
+                    border-bottom: 0.5px solid rgba(255,255,255,0.07);
+                    border-radius: 8px 8px 0 0;
+                    text-align: left;
+                    padding: 8px 12px;
+                    color: #c0d8f0;
+                    font-size: 12px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{ background: rgba(255,255,255,0.04); }}
+                QPushButton:checked {{
+                    border-left: 2px solid {GOLD};
+                    color: {GOLD};
+                    background: rgba(0,45,98,0.25);
+                }}
+            """)
+            hdr_inner=QHBoxLayout()
+            hdr_inner.setContentsMargins(0,0,0,0); hdr_inner.setSpacing(8)
+            ico=QLabel(icon_char)
+            ico.setStyleSheet(f"color:{GOLD};font-size:13px;background:transparent;border:none;")
+            hdr_inner.addWidget(ico)
+            title_lbl=QLabel(title)
+            title_lbl.setStyleSheet("color:#c0d8f0;font-size:12px;font-weight:bold;background:transparent;border:none;")
+            hdr_inner.addWidget(title_lbl)
+            hdr_inner.addStretch()
+            arr=QLabel("▾")
+            arr.setStyleSheet("color:#3a5070;font-size:10px;background:transparent;border:none;")
+            hdr_inner.addWidget(arr)
+            hdr_wgt=QWidget(); hdr_wgt.setLayout(hdr_inner)
+            hdr_wgt.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            hdr_btn_lay=QVBoxLayout(hdr_btn)
+            hdr_btn_lay.setContentsMargins(0,0,0,0)
+            hdr_btn_lay.addWidget(hdr_wgt)
+            vbox.addWidget(hdr_btn)
+            # Gövde
+            body=QWidget()
+            body.setStyleSheet("background:transparent;border:none;")
+            body_lay=QVBoxLayout(body)
+            body_lay.setSpacing(0); body_lay.setContentsMargins(0,0,0,0)
+            body.setVisible(expanded)
+            vbox.addWidget(body)
+            def toggle(checked,bw=body,b=hdr_btn,a=arr,t=title,tl=title_lbl):
+                bw.setVisible(checked)
+                a.setText("▾" if checked else "▸")
+            hdr_btn.toggled.connect(toggle)
+            return {"outer":outer,"body":body_lay,"title_lbl":title_lbl}
 
-        def divider():
-            d=QFrame(); d.setFrameShape(QFrame.Shape.HLine)
-            d.setStyleSheet("color:#1a2a40;background:#1a2a40;max-height:1px;")
-            return d
-
-        vl.addWidget(sec_title("ANALIZ BILGILERI"))
-        vl.addWidget(divider())
-        meta_w=QWidget(); meta_w.setStyleSheet(f"background:{BG};")
-        ml2=QFormLayout(meta_w); ml2.setSpacing(4)
-        ml2.setContentsMargins(10,6,10,8)
+        # ── Analiz Bilgileri ──────────────────────────────────────────────────
+        sec_meta=glass_section("📋","Analiz Bilgileri")
+        meta_w=QWidget(); meta_w.setStyleSheet("background:transparent;")
+        ml2=QFormLayout(meta_w); ml2.setSpacing(5)
+        ml2.setContentsMargins(10,6,10,10)
         ml2.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        for lbl_style in []:
+            pass
         self.e_product=QLineEdit()
         self.e_batch=QLineEdit()
         self.e_operator=QLineEdit()
         self.e_date=QLineEdit(datetime.datetime.now().strftime("%d.%m.%Y"))
-        for lbl,w in [(self.T["product"],self.e_product),
-                      (self.T["batch"],self.e_batch),
-                      (self.T["operator"],self.e_operator),
-                      (self.T["date"],self.e_date)]:
-            ml2.addRow(lbl, w)
-        vl.addWidget(meta_w)
+        for w in [self.e_product,self.e_batch,self.e_operator,self.e_date]:
+            w.setStyleSheet("""
+                QLineEdit{background:rgba(255,255,255,0.06);
+                    border:0.5px solid rgba(255,255,255,0.12);
+                    border-radius:4px;padding:4px 8px;color:#c0d8f0;}
+                QLineEdit:focus{border:0.5px solid #FFC600;}
+            """)
+        ml2.addRow(self.T["product"], self.e_product)
+        ml2.addRow(self.T["batch"],   self.e_batch)
+        ml2.addRow(self.T["operator"],self.e_operator)
+        ml2.addRow(self.T["date"],    self.e_date)
+        # Form label stilleri
+        for i in range(ml2.rowCount()):
+            lbl_item=ml2.itemAt(i, QFormLayout.ItemRole.LabelRole)
+            if lbl_item and lbl_item.widget():
+                lbl_item.widget().setStyleSheet("color:#5a8ab0;font-size:11px;background:transparent;")
+        sec_meta["body"].addWidget(meta_w)
+        vl.addWidget(sec_meta["outer"])
 
-        # ── Akış & Parametreler ──────────────────────────────────────────────
-        vl.addWidget(sec_title("AKIS & PARAMETRELER"))
-        vl.addWidget(divider())
-        flow_w=QWidget(); flow_w.setStyleSheet(f"background:{BG};")
-        fl=QVBoxLayout(flow_w); fl.setSpacing(5); fl.setContentsMargins(10,6,10,8)
-
+        # ── Akış & Parametreler ───────────────────────────────────────────────
+        sec_flow=glass_section("⚙","Akış & Parametreler")
+        flow_w=QWidget(); flow_w.setStyleSheet("background:transparent;")
+        fl=QVBoxLayout(flow_w); fl.setSpacing(5); fl.setContentsMargins(10,6,10,10)
+        glass_input_style="""
+            QLineEdit{background:rgba(255,255,255,0.06);
+                border:0.5px solid rgba(255,255,255,0.12);
+                border-radius:4px;padding:3px 6px;color:#c0d8f0;}
+            QLineEdit:focus{border:0.5px solid #FFC600;}
+        """
+        glass_combo_style="""
+            QComboBox{background:rgba(255,255,255,0.06);
+                border:0.5px solid rgba(255,255,255,0.12);
+                border-radius:4px;padding:3px 6px;color:#FFC600;font-weight:bold;}
+            QComboBox:focus{border:0.5px solid #FFC600;}
+            QComboBox QAbstractItemView{background:#1c2336;color:#c0d8f0;
+                border:1px solid #2a4060;}
+        """
         r1=QHBoxLayout(); r1.setSpacing(6)
         lf=QLabel(self.T["flow_rate"])
         lf.setStyleSheet(f"color:{GOLD};font-weight:bold;background:transparent;")
         r1.addWidget(lf)
         self.flow_combo=QComboBox()
         for fv in sorted(NGI_CUTOFFS.keys()): self.flow_combo.addItem(str(fv))
-        self.flow_combo.setCurrentText("60")
-        self.flow_combo.setFixedWidth(68)
+        self.flow_combo.setCurrentText("60"); self.flow_combo.setFixedWidth(72)
+        self.flow_combo.setStyleSheet(glass_combo_style)
         self.flow_combo.currentTextChanged.connect(self._on_flow)
-        r1.addWidget(self.flow_combo); r1.addWidget(QLabel("L/min")); r1.addStretch()
+        r1.addWidget(self.flow_combo)
+        lmin=QLabel("L/min"); lmin.setStyleSheet("color:#7090b0;background:transparent;")
+        r1.addWidget(lmin); r1.addStretch()
         fl.addLayout(r1)
-
         r2=QHBoxLayout(); r2.setSpacing(4)
-        r2.addWidget(QLabel(self.T["valid_range"]))
+        lvr=QLabel(self.T["valid_range"]); lvr.setStyleSheet("color:#7090b0;background:transparent;")
+        r2.addWidget(lvr)
         self.e_lo=QLineEdit("15"); self.e_lo.setFixedWidth(44)
-        r2.addWidget(self.e_lo); r2.addWidget(QLabel("–"))
+        self.e_lo.setStyleSheet(glass_input_style)
+        r2.addWidget(self.e_lo)
+        dash=QLabel("–"); dash.setStyleSheet("color:#5a8ab0;background:transparent;")
+        r2.addWidget(dash)
         self.e_hi=QLineEdit("85"); self.e_hi.setFixedWidth(44)
+        self.e_hi.setStyleSheet(glass_input_style)
         r2.addWidget(self.e_hi); r2.addStretch()
         fl.addLayout(r2)
-
         r3=QHBoxLayout(); r3.setSpacing(6)
-        r3.addWidget(QLabel(self.T["rsd_limit"]))
+        lrsd=QLabel(self.T["rsd_limit"]); lrsd.setStyleSheet("color:#7090b0;background:transparent;")
+        r3.addWidget(lrsd)
         self.e_rsd=QLineEdit("5"); self.e_rsd.setFixedWidth(38)
-        r3.addWidget(self.e_rsd); r3.addWidget(QLabel("%"))
+        self.e_rsd.setStyleSheet(glass_input_style)
+        r3.addWidget(self.e_rsd)
+        lpct=QLabel("%"); lpct.setStyleSheet("color:#5a8ab0;background:transparent;")
+        r3.addWidget(lpct)
         self.chk_delivered_tp=QCheckBox(self.T["delivered_tp"])
-        self.chk_delivered_tp.setStyleSheet("font-size:10px;")
+        self.chk_delivered_tp.setStyleSheet("font-size:10px;color:#7090b0;")
         r3.addWidget(self.chk_delivered_tp); r3.addStretch()
         fl.addLayout(r3)
-
-        # Cut-off küçük kutuları
-        co_w=QWidget(); co_w.setStyleSheet("background:#111827;border-radius:3px;")
+        co_w=QWidget()
+        co_w.setStyleSheet("background:rgba(0,0,0,0.2);border-radius:4px;")
         self.cbox_layout=QHBoxLayout(co_w)
         self.cbox_layout.setContentsMargins(4,2,4,2); self.cbox_layout.setSpacing(2)
         self.cbox=co_w; fl.addWidget(co_w)
-        vl.addWidget(flow_w)
+        sec_flow["body"].addWidget(flow_w)
+        vl.addWidget(sec_flow["outer"])
         self._refresh_cutoffs()
 
-        # ── Butonlar ─────────────────────────────────────────────────────────
-        vl.addWidget(sec_title("ISLEMLER"))
-        vl.addWidget(divider())
-        btn_w=QWidget(); btn_w.setStyleSheet(f"background:{BG};")
-        bl=QVBoxLayout(btn_w); bl.setSpacing(4); bl.setContentsMargins(10,6,10,8)
+        # ── İşlemler ─────────────────────────────────────────────────────────
+        sec_ops=glass_section("▶","İşlemler")
+        ops_w=QWidget(); ops_w.setStyleSheet("background:transparent;")
+        ol=QVBoxLayout(ops_w); ol.setSpacing(4); ol.setContentsMargins(10,6,10,10)
+        glass_btn = lambda text,obj=None,color=None: self._make_glass_btn(text,obj,color)
 
-        row1=QHBoxLayout(); row1.setSpacing(4)
-        self.btn_calc=QPushButton(self.T["calculate"])
-        self.btn_calc.setObjectName("btn_calc")
+        def make_btn(text, obj_name=None, color=None, height=30):
+            b=QPushButton(text); b.setFixedHeight(height)
+            base=color or "#1a2e4a"
+            b.setStyleSheet(f"""
+                QPushButton{{background:{base};border:0.5px solid rgba(255,255,255,0.12);
+                    border-radius:5px;color:#c0d8f0;font-size:12px;font-weight:bold;
+                    padding:0 8px;}}
+                QPushButton:hover{{background:rgba(255,255,255,0.08);
+                    border:0.5px solid rgba(255,198,0,0.4);}}
+                QPushButton:pressed{{background:rgba(0,0,0,0.2);}}
+            """)
+            if obj_name: b.setObjectName(obj_name)
+            return b
+
+        row1=QHBoxLayout(); row1.setSpacing(5)
+        self.btn_calc=make_btn(self.T["calculate"],"btn_calc","rgba(20,80,20,0.7)")
         self.btn_calc.clicked.connect(self._calculate)
         row1.addWidget(self.btn_calc)
-        self.btn_clr=QPushButton(self.T["clear"])
-        self.btn_clr.setObjectName("btn_clr")
-        self.btn_clr.clicked.connect(self._clear)
-        self.btn_clr.setFixedWidth(70)
+        self.btn_clr=make_btn(self.T["clear"],None,"rgba(60,50,10,0.6)")
+        self.btn_clr.setFixedWidth(74); self.btn_clr.clicked.connect(self._clear)
         row1.addWidget(self.btn_clr)
-        bl.addLayout(row1)
+        ol.addLayout(row1)
 
-        row2=QHBoxLayout(); row2.setSpacing(4)
-        self.btn_pdf=QPushButton(self.T["export_pdf"])
-        self.btn_pdf.setObjectName("btn_pdf")
+        row2=QHBoxLayout(); row2.setSpacing(5)
+        self.btn_pdf=make_btn(self.T["export_pdf"],None,"rgba(60,20,90,0.7)")
         self.btn_pdf.clicked.connect(self._export_pdf)
         row2.addWidget(self.btn_pdf)
-        self.btn_csv=QPushButton(self.T["load_csv"])
-        self.btn_csv.setObjectName("btn_csv")
+        self.btn_csv=make_btn(self.T["load_csv"],None,"rgba(10,60,50,0.7)")
         self.btn_csv.clicked.connect(self._load_csv)
         row2.addWidget(self.btn_csv)
-        bl.addLayout(row2)
-        vl.addWidget(btn_w)
+        ol.addLayout(row2)
+        sec_ops["body"].addWidget(ops_w)
+        vl.addWidget(sec_ops["outer"])
 
-        # ── Seriler ──────────────────────────────────────────────────────────
-        vl.addWidget(sec_title("SERILER"))
-        vl.addWidget(divider())
+        # ── Seriler ───────────────────────────────────────────────────────────
+        self._sec_series=glass_section("◈","Seriler (0)")
+        ser_w=QWidget(); ser_w.setStyleSheet("background:transparent;")
+        sv=QVBoxLayout(ser_w); sv.setSpacing(4); sv.setContentsMargins(10,6,10,10)
 
-        sel_w=QWidget(); sel_w.setStyleSheet(f"background:{BG};")
-        sl2=QHBoxLayout(sel_w); sl2.setSpacing(4); sl2.setContentsMargins(10,4,10,4)
-        self.btn_add=QPushButton("+ "+self.T["add_series"])
-        self.btn_add.setFixedHeight(26)
-        self.btn_add.setStyleSheet("font-size:11px;")
+        # Seri kontrol butonları
+        sc_row=QHBoxLayout(); sc_row.setSpacing(4)
+        self.btn_add=make_btn("+ "+self.T["add_series"],None,"rgba(20,50,100,0.6)",26)
         self.btn_add.clicked.connect(self._add_series)
-        sl2.addWidget(self.btn_add)
-        self.btn_sel_all=QPushButton("Tümü ✓")
-        self.btn_sel_all.setFixedSize(62,26)
-        self.btn_sel_all.setStyleSheet("font-size:11px;")
+        sc_row.addWidget(self.btn_add)
+        self.btn_sel_all=make_btn("✓ Tümü",None,"rgba(20,50,20,0.5)",26)
+        self.btn_sel_all.setFixedWidth(68)
         self.btn_sel_all.clicked.connect(self._select_all_series)
-        sl2.addWidget(self.btn_sel_all)
-        self.btn_sel_none=QPushButton("Tümü ✕")
-        self.btn_sel_none.setFixedSize(62,26)
-        self.btn_sel_none.setStyleSheet("font-size:11px;background:#3a1a1a;")
+        sc_row.addWidget(self.btn_sel_all)
+        self.btn_sel_none=make_btn("✕ Gizle",None,"rgba(60,20,20,0.5)",26)
+        self.btn_sel_none.setFixedWidth(68)
         self.btn_sel_none.clicked.connect(self._deselect_all_series)
-        sl2.addWidget(self.btn_sel_none)
-        vl.addWidget(sel_w)
+        sc_row.addWidget(self.btn_sel_none)
+        sv.addLayout(sc_row)
 
         # Seri listesi
         self.series_container=QWidget()
-        self.series_container.setStyleSheet(f"background:{BG2};")
+        self.series_container.setStyleSheet("background:transparent;")
         self.series_layout=QVBoxLayout(self.series_container)
-        self.series_layout.setSpacing(0); self.series_layout.setContentsMargins(0,0,0,0)
+        self.series_layout.setSpacing(2); self.series_layout.setContentsMargins(0,0,0,0)
         self.series_layout.addStretch()
-        vl.addWidget(self.series_container)
+        sv.addWidget(self.series_container)
+        self._sec_series["body"].addWidget(ser_w)
+        vl.addWidget(self._sec_series["outer"])
         vl.addStretch()
-
         scroll.setWidget(inner); layout.addWidget(scroll)
+
+    def _update_series_count(self):
+        n=len(self.series_panels)
+        lbl="Seriler" if self.lang=="TR" else "Series"
+        try: self._sec_series["title_lbl"].setText(f"{lbl} ({n})")
+        except: pass
+
 
     def _build_right(self, layout):
         self.tabs=QTabWidget()
@@ -935,14 +1058,98 @@ class NGIApp(QMainWindow):
         self.tabs.currentChanged.connect(self._on_tab_change)
         layout.addWidget(self.tabs,1)
 
-        # Sonuçlar
-        self.tab_results=QScrollArea(); self.tab_results.setWidgetResizable(True)
-        self.results_widget=QWidget()
-        self.results_layout=QVBoxLayout(self.results_widget)
-        self.results_layout.setSpacing(6); self.results_layout.setContentsMargins(8,8,8,8)
-        self.results_layout.addStretch()
-        self.tab_results.setWidget(self.results_widget)
-        self.tabs.addTab(self.tab_results, self.T["tab_results"])
+        # Nokta Grafik sekmesi
+        self.tab_scatter=QWidget()
+        sl=QVBoxLayout(self.tab_scatter); sl.setContentsMargins(4,4,4,4); sl.setSpacing(4)
+        # Kontrol paneli
+        sc_ctrl=QFrame(); sc_ctrl.setFixedHeight(68)
+        sc_ctrl.setStyleSheet(f"background:{BG3};border-radius:4px;border:1px solid #2a4060;")
+        sc_vl=QVBoxLayout(sc_ctrl); sc_vl.setContentsMargins(8,4,8,4); sc_vl.setSpacing(4)
+        # Satır 1: parametre butonları
+        row1=QHBoxLayout(); row1.setSpacing(4)
+        row1.addWidget(QLabel("Parametre:"))
+        self.scatter_param_grp=QButtonGroup(self)
+        self._sc_param_btns={}
+        for key,lbl in [("fpd","FPD"),("fpf","FPF"),("mmad","MMAD"),("gsd","GSD")]:
+            btn=QPushButton(lbl); btn.setCheckable(True)
+            btn.setFixedHeight(26)
+            btn.setStyleSheet("""
+                QPushButton{background:#1a2a4a;border:1px solid #2a4060;border-radius:4px;
+                    color:#aac8e8;font-size:12px;font-weight:bold;padding:0 12px;}
+                QPushButton:checked{background:#2E75B6;border-color:#4a95d6;color:white;}
+                QPushButton:hover:!checked{background:#253a5e;}
+            """)
+            if key=="fpd": btn.setChecked(True)
+            self.scatter_param_grp.addButton(btn)
+            self._sc_param_btns[key]=btn
+            row1.addWidget(btn)
+        row1.addStretch()
+        sc_vl.addLayout(row1)
+        # Satır 2: alt ölçek butonları (FPD/FPF için)
+        row2=QHBoxLayout(); row2.setSpacing(4)
+        row2.addWidget(QLabel("Alt ölçek:"))
+        self.scatter_scale_grp=QButtonGroup(self)
+        self._sc_scale_btns={}
+        for key,lbl in [("5","5 µm"),("3","3 µm"),("15","1,5 µm")]:
+            btn=QPushButton(lbl); btn.setCheckable(True)
+            btn.setFixedHeight(24)
+            btn.setStyleSheet("""
+                QPushButton{background:#141824;border:1px solid #2a4060;border-radius:4px;
+                    color:#7090b0;font-size:11px;padding:0 10px;}
+                QPushButton:checked{background:#1a3a6a;border-color:#2a5a9a;color:#aac8e8;}
+                QPushButton:hover:!checked{background:#1a2a3a;}
+            """)
+            if key=="5": btn.setChecked(True)
+            self.scatter_scale_grp.addButton(btn)
+            self._sc_scale_btns[key]=btn
+            row2.addWidget(btn)
+        row2.addStretch()
+        self.sc_row2_widget=QWidget()
+        self.sc_row2_widget.setLayout(row2)
+        sc_vl.addWidget(self.sc_row2_widget)
+        sl.addWidget(sc_ctrl)
+        # Grafik + seri listesi yan yana
+        sc_body=QHBoxLayout(); sc_body.setSpacing(6)
+        self.scatter_canvas=FigureCanvas(Figure(figsize=(8,5), facecolor=BG))
+        sc_body.addWidget(self.scatter_canvas, 1)
+        # Seri seçim paneli
+        sc_ser_frame=QFrame()
+        sc_ser_frame.setFixedWidth(180)
+        sc_ser_frame.setStyleSheet(
+            f"background:{BG3};border-radius:4px;border:1px solid #2a4060;")
+        sc_ser_vl=QVBoxLayout(sc_ser_frame)
+        sc_ser_vl.setContentsMargins(6,6,6,6); sc_ser_vl.setSpacing(4)
+        sc_ser_title=QLabel("Seriler")
+        sc_ser_title.setStyleSheet(
+            f"color:{GOLD};font-weight:bold;font-size:12px;background:transparent;")
+        sc_ser_vl.addWidget(sc_ser_title)
+        sc_btn_row=QHBoxLayout(); sc_btn_row.setSpacing(4)
+        sc_all=QPushButton("Tümü ✓"); sc_all.setFixedHeight(22)
+        sc_all.setStyleSheet("font-size:10px;")
+        sc_all.clicked.connect(self._scatter_sel_all)
+        sc_none=QPushButton("Tümü ✕"); sc_none.setFixedHeight(22)
+        sc_none.setStyleSheet("font-size:10px;background:#3a1a1a;")
+        sc_none.clicked.connect(self._scatter_sel_none)
+        sc_btn_row.addWidget(sc_all); sc_btn_row.addWidget(sc_none)
+        sc_ser_vl.addLayout(sc_btn_row)
+        # Seri listesi (scroll)
+        sc_ser_scroll=QScrollArea(); sc_ser_scroll.setWidgetResizable(True)
+        sc_ser_scroll.setStyleSheet("background:transparent;border:none;")
+        self._sc_ser_container=QWidget()
+        self._sc_ser_container.setStyleSheet("background:transparent;")
+        self._sc_ser_layout=QVBoxLayout(self._sc_ser_container)
+        self._sc_ser_layout.setSpacing(3); self._sc_ser_layout.setContentsMargins(0,0,0,0)
+        self._sc_ser_layout.addStretch()
+        sc_ser_scroll.setWidget(self._sc_ser_container)
+        sc_ser_vl.addWidget(sc_ser_scroll, 1)
+        sc_body.addWidget(sc_ser_frame)
+        sl.addLayout(sc_body, 1)
+        self.tabs.addTab(self.tab_scatter, "Nokta Grafik")
+        # Parametre/ölçek değişince yeniden çiz
+        for btn in self._sc_param_btns.values():
+            btn.toggled.connect(lambda c: self._on_scatter_param() if c else None)
+        for btn in self._sc_scale_btns.values():
+            btn.toggled.connect(lambda c: self._plot_scatter() if c else None)
 
         # Log-Probit
         self.tab_lp=QWidget()
@@ -957,9 +1164,15 @@ class NGIApp(QMainWindow):
         lpl.addWidget(self.lp_canvas,1)
         self.tabs.addTab(self.tab_lp, self.T["tab_plot"])
 
-        # Dağılım
+        # Dağılım — tüm sekme scroll içinde
         self.tab_dist=QWidget()
-        dl=QVBoxLayout(self.tab_dist); dl.setContentsMargins(4,4,4,4); dl.setSpacing(4)
+        dist_outer=QVBoxLayout(self.tab_dist)
+        dist_outer.setContentsMargins(0,0,0,0); dist_outer.setSpacing(0)
+        dist_scroll=QScrollArea(); dist_scroll.setWidgetResizable(True)
+        dist_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        dist_scroll.setStyleSheet("border:none;")
+        dist_inner=QWidget()
+        dl=QVBoxLayout(dist_inner); dl.setContentsMargins(4,4,4,4); dl.setSpacing(4)
         lim_panel=QFrame(); lim_panel.setFixedHeight(36)
         lim_panel.setStyleSheet(f"background:{BG3};border-radius:4px;border:1px solid #2a4060;")
         limhl=QHBoxLayout(lim_panel); limhl.setSpacing(8); limhl.setContentsMargins(8,2,8,2)
@@ -981,7 +1194,8 @@ class NGIApp(QMainWindow):
         limhl.addWidget(self.e_lim_pct); limhl.addStretch()
         dl.addWidget(lim_panel)
         self.dist_canvas=FigureCanvas(Figure(figsize=(9,5), facecolor=BG))
-        dl.addWidget(self.dist_canvas,1)
+        self.dist_canvas.setMinimumHeight(420)
+        dl.addWidget(self.dist_canvas)
         # Uyarı scroll
         self.warn_scroll=QScrollArea(); self.warn_scroll.setWidgetResizable(True)
         self.warn_scroll.setMaximumHeight(160); self.warn_scroll.setVisible(False)
@@ -991,6 +1205,9 @@ class NGIApp(QMainWindow):
         self.warn_layout.setContentsMargins(6,4,6,4); self.warn_layout.setSpacing(3)
         self.warn_scroll.setWidget(self.warn_container)
         dl.addWidget(self.warn_scroll)
+        dist_inner.setLayout(dl)
+        dist_scroll.setWidget(dist_inner)
+        dist_outer.addWidget(dist_scroll)
         self.tabs.addTab(self.tab_dist, self.T["tab_dist"])
 
         # Özet
@@ -1088,11 +1305,11 @@ class NGIApp(QMainWindow):
         self._clear_results()
 
     def _clear_results(self):
-        for lay in [self.results_layout, self.summary_layout, self.compare_layout]:
+        for lay in [self.summary_layout, self.compare_layout]:
             for i in reversed(range(lay.count()-1)):
                 w=lay.itemAt(i).widget()
                 if w: w.setParent(None)
-        for canvas in [self.lp_canvas, self.dist_canvas]:
+        for canvas in [self.lp_canvas, self.dist_canvas, self.scatter_canvas]:
             canvas.figure.clear(); canvas.draw()
         for i in reversed(range(self.warn_layout.count())):
             w=self.warn_layout.itemAt(i).widget()
@@ -1125,13 +1342,13 @@ class NGIApp(QMainWindow):
     def _on_calc_done(self, results):
         self.all_series=results; self.btn_calc.setEnabled(True)
         self._clear_results()
+        self._rebuild_scatter_series_list()
         cur=self.tabs.currentIndex()
-        if cur==0: self._show_results()
+        if cur==0: self._plot_scatter()
         elif cur==1: self._plot_lp()
         elif cur==2: self._plot_dist()
         elif cur==3: self._show_summary()
         elif cur==4: self._show_compare()
-        if cur!=0: self._show_results()
         self.status_lbl.setText(self.T["status_done"])
 
     def _on_calc_error(self, msg):
@@ -1140,106 +1357,200 @@ class NGIApp(QMainWindow):
 
     def _on_tab_change(self, idx):
         if not self.all_series: return
-        if idx==1: self._plot_lp()
+        if idx==0: self._plot_scatter()
+        elif idx==1: self._plot_lp()
         elif idx==2: self._plot_dist()
         elif idx==3: self._show_summary()
         elif idx==4: self._show_compare()
 
     # ── Sonuçlar ──────────────────────────────────────────────────────────────
-    def _show_results(self):
-        for i in reversed(range(self.results_layout.count()-1)):
-            w=self.results_layout.itemAt(i).widget()
+    # ── Nokta Grafik metodları ────────────────────────────────────────────────
+    def _rebuild_scatter_series_list(self):
+        """Seri listesini yeniden oluştur"""
+        for i in reversed(range(self._sc_ser_layout.count()-1)):
+            w = self._sc_ser_layout.itemAt(i).widget()
             if w: w.setParent(None)
-        T=self.T; ds=T["dec_sep"]
-        co=NGI_CUTOFFS[int(self.flow_combo.currentText())]
-        compact=len(self.all_series)>=5
+        self._sc_ser_checks = {}
         for sd in self.all_series:
-            rt=f"  [{T['ref_label']}]" if sd["is_ref"] else ""
-            sh=QLabel(f"▌ {sd['name']}{rt}")
-            sh.setStyleSheet(f"color:{sd['color']};font-size:14px;font-weight:bold;"
-                f"background:{BG2};border-left:3px solid {sd['color']};padding:4px 8px;")
-            self.results_layout.insertWidget(self.results_layout.count()-1,sh)
-            for run in sd["runs"]:
-                rh=QLabel(f"    Run {run['run_no']}")
-                rh.setStyleSheet("color:#aac8e8;font-weight:bold;padding:2px 12px;"
-                    "background:transparent;")
-                self.results_layout.insertWidget(self.results_layout.count()-1,rh)
-                if "error" in run:
-                    el=QLabel(f"      {T['insufficient']} (n={run.get('n',0)})")
-                    el.setStyleSheet("color:#ff6060;padding:2px 20px;background:transparent;")
-                    self.results_layout.insertWidget(self.results_layout.count()-1,el)
-                    continue
-                pf=QFrame(); pf.setStyleSheet(
-                    f"background:#1a2540;border-radius:4px;border:1px solid #2a4060;")
-                pfl=QHBoxLayout(pf); pfl.setContentsMargins(8,5,8,5); pfl.setSpacing(10)
-                params=[
-                    (T["metered"],fmt_num(run["metered"],4,ds)),
-                    (T["delivered"],fmt_num(run["delivered"],4,ds)),
-                    (T["fp_dose"],fmt_num(run["fpd"],4,ds)),
-                    (T["fp_frac"],fmt_num(run["fpf"],3,ds)),
-                    ("MMAD",fmt_num(run["mmad"],4,ds)),
-                    ("GSD",fmt_num(run["gsd"],4,ds)),
-                    (T["slope_lbl"],fmt_num(run["slope"],4,ds)),
-                    (T["int_lbl"],fmt_num(run["intercept"],4,ds)),
-                    (T["r2_lbl"],fmt_num(run["r2"],4,ds)),
-                    (T["n_lbl"],str(run["n"])),
-                ]
-                for lbl,val in params:
-                    ik=lbl in(T["fp_dose"],T["fp_frac"],"MMAD","GSD")
-                    l1=QLabel(lbl)
-                    l1.setStyleSheet("color:#5a8ab0;font-size:11px;background:transparent;")
-                    l2=QLabel(val)
-                    l2.setStyleSheet(
-                        f"color:{'#FFC600' if ik else '#e0f0ff'};"
-                        f"font-weight:{'bold' if ik else 'normal'};"
-                        f"font-size:{'13px' if ik else '12px'};background:transparent;")
-                    pfl.addWidget(l1); pfl.addWidget(l2)
-                pfl.addStretch()
-                self.results_layout.insertWidget(self.results_layout.count()-1,pf)
-                if not compact:
-                    self._add_cum_table(run,co,ds)
+            row = QWidget()
+            row.setStyleSheet("background:transparent;")
+            rl = QHBoxLayout(row); rl.setContentsMargins(0,1,0,1); rl.setSpacing(4)
+            bar = QFrame(); bar.setFixedSize(3,16)
+            bar.setStyleSheet(f"background:{sd['color']};border-radius:1px;")
+            rl.addWidget(bar)
+            chk = QCheckBox(sd["name"])
+            chk.setChecked(True)
+            chk.setStyleSheet(f"""
+                QCheckBox{{color:#c0d8f0;font-size:11px;spacing:4px;}}
+                QCheckBox::indicator{{width:13px;height:13px;
+                    border:1.5px solid {sd['color']};border-radius:2px;background:transparent;}}
+                QCheckBox::indicator:checked{{background:{sd['color']};}}
+            """)
+            chk.stateChanged.connect(lambda _: self._plot_scatter())
+            rl.addWidget(chk, 1)
+            self._sc_ser_layout.insertWidget(
+                self._sc_ser_layout.count()-1, row)
+            self._sc_ser_checks[sd["name"]] = chk
 
-    def _add_cum_table(self, run, co, ds):
-        T=self.T
-        tf=QFrame()
-        tf.setStyleSheet("background:#111827;border-radius:4px;border:1px solid #1a2a40;")
-        tfl=QVBoxLayout(tf); tfl.setContentsMargins(3,3,3,3); tfl.setSpacing(1)
-        hdrs=[T["stage"],"D50",T["mass_mg"],T["cum_mass"],T["cum_pct"],T["valid_pt"],T["probit_z"]]
-        ws=[56,60,72,76,64,46,76]
-        hf=QFrame(); hf.setStyleSheet("background:#1F4E79;border-radius:2px;")
-        hfl=QHBoxLayout(hf); hfl.setContentsMargins(2,2,2,2); hfl.setSpacing(0)
-        for h,w in zip(hdrs,ws):
-            l=QLabel(h); l.setFixedWidth(w); l.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            l.setStyleSheet("color:white;font-weight:bold;font-size:11px;background:transparent;")
-            hfl.addWidget(l)
-        hfl.addStretch(); tfl.addWidget(hf)
-        valid_st={v["stage"] for v in run["valid"]}; cum_m=0.0
-        for i2,row in enumerate(run["cum_data"]):
-            s=row["stage"]
-            if s not in (["Throat"]+[x for x in ALL_KEYS if co.get(x,999)<900]): continue
-            cum_m+=row["mass"]; iv=s in valid_st
-            pz=""
-            if 0<row["u_pct"]<100:
-                try: pz=fmt_num(norm.ppf(row["u_pct"]/100),4,ds)
-                except: pass
-            d50_str=fmt_num(row["d50"],3,ds) if row["d50"]<900 else "---"
-            bg="#1a3a1a" if iv else("#111827" if i2%2==0 else "#0e1219")
-            dr=QFrame(); dr.setStyleSheet(f"background:{bg};")
-            dfl=QHBoxLayout(dr); dfl.setContentsMargins(2,1,2,1); dfl.setSpacing(0)
-            for val,w in zip([s,d50_str,fmt_num(row["mass"],4,ds),
-                              fmt_num(cum_m,4,ds),fmt_num(row["u_pct"],3,ds),
-                              "✓" if iv else "",pz],ws):
-                l=QLabel(val); l.setFixedWidth(w)
-                l.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                l.setStyleSheet(
-                    f"color:{'#90ee90' if iv else '#c0d0e0'};"
-                    f"font-weight:{'bold' if iv else 'normal'};"
-                    "font-size:11px;background:transparent;")
-                dfl.addWidget(l)
-            dfl.addStretch(); tfl.addWidget(dr)
-        self.results_layout.insertWidget(self.results_layout.count()-1,tf)
+    def _scatter_sel_all(self):
+        for chk in self._sc_ser_checks.values():
+            chk.setChecked(True)
 
-    # ── Log-Probit ────────────────────────────────────────────────────────────
+    def _scatter_sel_none(self):
+        for chk in self._sc_ser_checks.values():
+            chk.setChecked(False)
+
+    def _on_scatter_param(self):
+        """Parametre butonu değişince alt ölçek görünürlüğünü ayarla"""
+        param = self._get_scatter_param()
+        show_scale = param in ("fpd","fpf")
+        self.sc_row2_widget.setVisible(show_scale)
+        self._plot_scatter()
+
+    def _get_scatter_param(self):
+        for key, btn in self._sc_param_btns.items():
+            if btn.isChecked(): return key
+        return "fpd"
+
+    def _get_scatter_scale(self):
+        for key, btn in self._sc_scale_btns.items():
+            if btn.isChecked(): return key
+        return "5"
+
+    def _get_scatter_key(self):
+        """Gerçek parametre anahtarını döndür (fpd3, fpd15 gibi)"""
+        param = self._get_scatter_param()
+        scale = self._get_scatter_scale()
+        if param == "fpd":
+            return {"5":"fpd","3":"fpd3","15":"fpd15"}[scale]
+        elif param == "fpf":
+            return {"5":"fpf","3":"fpf3","15":"fpf15"}[scale]
+        else:
+            return param  # mmad, gsd
+
+    def _get_scatter_label(self):
+        param = self._get_scatter_param()
+        scale = self._get_scatter_scale()
+        ds = self.T["dec_sep"]
+        if param == "fpd":
+            d = {"5":"5","3":"3","15":"1,5"}[scale]
+            return f"FPD ≤{d} µm [mg]"
+        elif param == "fpf":
+            d = {"5":"5","3":"3","15":"1,5"}[scale]
+            return f"FPF ≤{d} µm [%]"
+        elif param == "mmad": return "MMAD [µm]"
+        elif param == "gsd":  return "GSD"
+        return param
+
+    def _plot_scatter(self):
+        if not self.all_series: return
+        plt.close("all")
+        fig = self.scatter_canvas.figure; fig.clear()
+        fig.patch.set_facecolor(BG)
+        ax = fig.add_subplot(111); ax.set_facecolor("#0e1525")
+
+        key = self._get_scatter_key()
+        lbl = self._get_scatter_label()
+        ds  = self.T["dec_sep"]
+
+        # Limit hesabı
+        lm = {"ema":20,"fda":15,"usp":25}
+        try: pct = lm.get(self.limit_type) or float(self.e_lim_pct.text())
+        except: pct = 20
+
+        # Referans değeri bul
+        ref_val = None
+        ref_sd  = next((sd for sd in self.all_series if sd["is_ref"]), None)
+        if ref_sd and ref_sd["avg"] and key in ref_sd["avg"]["params"]:
+            ref_val = ref_sd["avg"]["params"][key][0]
+
+        # Görünür seriler
+        visible = [sd for sd in self.all_series
+                   if sd["name"] in getattr(self,'_sc_ser_checks',{})
+                   and self._sc_ser_checks[sd["name"]].isChecked()]
+
+        if not visible:
+            ax.text(0.5,0.5,"Seri seçilmedi",transform=ax.transAxes,
+                ha="center",va="center",color=TXT2,fontsize=13)
+            fig.tight_layout(); self.scatter_canvas.draw(); return
+
+        # Limit çizgileri (referans varsa)
+        if ref_val is not None and ref_val > 0:
+            ax.axhline(ref_val, color="#4a9ae8", lw=2.0, zorder=2,
+                label=f"Referans = {fmt_num(ref_val,3,ds)}")
+            up = ref_val*(1+pct/100); lo = ref_val*(1-pct/100)
+            ax.axhline(up, color="#FF4444", lw=1.5, ls="--", zorder=2,
+                label=f"+{pct:.0f}% = {fmt_num(up,3,ds)}")
+            ax.axhline(lo, color="#FF4444", lw=1.5, ls="--", zorder=2,
+                label=f"–{pct:.0f}% = {fmt_num(lo,3,ds)}")
+            ax.fill_between([-0.5, len(visible)-0.5], lo, up,
+                color="#FF4444", alpha=0.05, zorder=1)
+
+        # Noktaları çiz
+        x_positions = list(range(len(visible)))
+        for xi, sd in enumerate(visible):
+            if not sd["avg"] or key not in sd["avg"]["params"]: continue
+            val, val_sd = sd["avg"]["params"][key][0], sd["avg"]["params"][key][1]
+            is_ref = sd["is_ref"]
+            marker = "*" if is_ref else "o"
+            ms = 16 if is_ref else 10
+            zord = 5 if is_ref else 4
+            ax.plot(xi, val, marker=marker, color=sd["color"],
+                markersize=ms, markeredgecolor="white",
+                markeredgewidth=0.8, zorder=zord)
+            # Error bar (SD)
+            if val_sd > 0:
+                ax.errorbar(xi, val, yerr=val_sd, fmt="none",
+                    color=sd["color"], capsize=5, lw=1.5, alpha=0.7, zorder=3)
+            # Değer etiketi
+            ax.annotate(
+                f"{fmt_num(val,3,ds)}",
+                xy=(xi, val), xytext=(0, 14),
+                textcoords="offset points",
+                ha="center", va="bottom",
+                fontsize=9, color=sd["color"],
+                fontweight="bold" if is_ref else "normal")
+
+        # Seri etiketleri (seri adı)
+        for xi, sd in enumerate(visible):
+            ax.annotate(
+                sd["name"],
+                xy=(xi, ax.get_ylim()[0] if ax.get_ylim()[0] != 0 else 0),
+                xytext=(xi, ax.get_ylim()[0]),
+                ha="center", va="top",
+                fontsize=9, color="#7090b0", rotation=20)
+
+        # Limit dışı noktaları kırmızı çerçevele
+        if ref_val is not None and ref_val > 0:
+            for xi, sd in enumerate(visible):
+                if not sd["avg"] or key not in sd["avg"]["params"]: continue
+                val = sd["avg"]["params"][key][0]
+                up_v = ref_val*(1+pct/100); lo_v = ref_val*(1-pct/100)
+                if val > up_v or val < lo_v:
+                    ax.plot(xi, val, "o", color="none",
+                        markeredgecolor="#FF4444",
+                        markeredgewidth=2.5,
+                        markersize=18, zorder=6)
+
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels([sd["name"] for sd in visible],
+            rotation=20, ha="right", fontsize=10, color="#c0d8f0")
+        ax.tick_params(colors=TXT2, labelsize=10)
+        for sp in ax.spines.values(): sp.set_color("#2a4060")
+        ax.set_ylabel(lbl, color=TXT2, fontsize=12)
+        title = f"Nokta Grafik — {lbl}"
+        if ref_val: title += f"  |  Limit ±{pct:.0f}%"
+        ax.set_title(title, color=GOLD, fontsize=13, fontweight="bold")
+        ax.grid(True, axis="y", color="#1a3050", ls="--", alpha=0.5)
+        ax.set_xlim(-0.6, len(visible)-0.4)
+        hdls, lbls = ax.get_legend_handles_labels()
+        if hdls:
+            ax.legend(fontsize=9, facecolor="#0e1525", labelcolor="#d0e0f0",
+                framealpha=0.85, loc="upper right")
+        fig.tight_layout()
+        self.scatter_canvas.draw()
+
+
     def _plot_lp(self):
         plt.close("all")
         fig=self.lp_canvas.figure; fig.clear(); fig.patch.set_facecolor(BG)
@@ -1403,7 +1714,9 @@ class NGIApp(QMainWindow):
         try: rsd_lim=float(self.e_rsd.text())
         except: rsd_lim=5.0
         params_list=[("metered",T["metered"]),("delivered",T["delivered"]),
-                     ("fpd",T["fp_dose"]),("fpf",T["fp_frac"]),
+                     ("fpd",T["fp_dose"]+" (5µm)"),("fpf",T["fp_frac"]+" (5µm)"),
+                     ("fpd3","FPD (3µm) [mg]"),("fpf3","FPF (3µm) [%]"),
+                     ("fpd15","FPD (1.5µm) [mg]"),("fpf15","FPF (1.5µm) [%]"),
                      ("mmad","MMAD (um)"),("gsd","GSD"),
                      ("slope",T["slope_lbl"]),("intercept",T["int_lbl"]),("r2",T["r2_lbl"])]
         for sd in self.all_series:
@@ -1501,7 +1814,9 @@ class NGIApp(QMainWindow):
             self.compare_layout.insertWidget(self.compare_layout.count()-1,canvas2)
         ref_sd=next((sd for sd in vis_ser if sd["is_ref"]),None)
         params_list=[("mmad","MMAD (um)"),("gsd","GSD"),
-                     ("fpd",T["fp_dose"]),("fpf",T["fp_frac"]),
+                     ("fpd",T["fp_dose"]+" (5µm)"),("fpf",T["fp_frac"]+" (5µm)"),
+                     ("fpd3","FPD (3µm)"),("fpf3","FPF (3µm)"),
+                     ("fpd15","FPD (1.5µm)"),("fpf15","FPF (1.5µm)"),
                      ("slope",T["slope_lbl"]),("intercept",T["int_lbl"]),("r2",T["r2_lbl"])]
         tf=QFrame(); tf.setStyleSheet("background:#111827;border-radius:4px;border:1px solid #1a2a40;")
         tfl=QVBoxLayout(tf); tfl.setContentsMargins(2,2,2,2); tfl.setSpacing(1)
@@ -1579,7 +1894,7 @@ class NGIApp(QMainWindow):
         self.chk_delivered_tp.setText(T["delivered_tp"])
         self._refresh_cutoffs()
         for p in self.series_panels: p.update_lang(T)
-        for i,k in enumerate(["tab_results","tab_plot","tab_dist","tab_summary","tab_compare"]):
+        for i,k in enumerate(["tab_scatter","tab_plot","tab_dist","tab_summary","tab_compare"]):
             self.tabs.setTabText(i,T[k])
         if self.all_series:
             cur=self.tabs.currentIndex()
