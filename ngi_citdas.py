@@ -1083,22 +1083,28 @@ class NGIApp(QMainWindow):
         self.tabs.currentChanged.connect(self._on_tab_change)
         layout.addWidget(self.tabs,1)
 
-        # Nokta Grafik sekmesi
+        # ── TAB 0: Sonuçlar (Özet) ───────────────────────────────────────────
+        self.tab_summary=QScrollArea(); self.tab_summary.setWidgetResizable(True)
+        self.summary_widget=QWidget()
+        self.summary_layout=QVBoxLayout(self.summary_widget)
+        self.summary_layout.setSpacing(6); self.summary_layout.setContentsMargins(8,8,8,8)
+        self.summary_layout.addStretch()
+        self.tab_summary.setWidget(self.summary_widget)
+        self.tabs.addTab(self.tab_summary, self.T["tab_summary"])
+
+        # ── TAB 1: Nokta Grafik ──────────────────────────────────────────────
         self.tab_scatter=QWidget()
         sl=QVBoxLayout(self.tab_scatter); sl.setContentsMargins(4,4,4,4); sl.setSpacing(4)
-        # Kontrol paneli
         sc_ctrl=QFrame(); sc_ctrl.setFixedHeight(68)
         sc_ctrl.setStyleSheet(f"background:{BG3};border-radius:4px;border:1px solid #2a4060;")
         sc_vl=QVBoxLayout(sc_ctrl); sc_vl.setContentsMargins(8,4,8,4); sc_vl.setSpacing(4)
-        # Satır 1: parametre butonları
         row1=QHBoxLayout(); row1.setSpacing(4)
         row1.addWidget(QLabel("Parametre:"))
         self.scatter_param_grp=QButtonGroup(self)
         self._sc_param_btns={}
         for key,lbl in [("fpd","FPD"),("fpf","FPF"),("mmad","MMAD"),("gsd","GSD"),
                           ("d10","D10"),("d50","D50"),("d90","D90")]:
-            btn=QPushButton(lbl); btn.setCheckable(True)
-            btn.setFixedHeight(26)
+            btn=QPushButton(lbl); btn.setCheckable(True); btn.setFixedHeight(26)
             btn.setStyleSheet("""
                 QPushButton{background:#1a2a4a;border:1px solid #2a4060;border-radius:4px;
                     color:#aac8e8;font-size:12px;font-weight:bold;padding:0 12px;}
@@ -1107,18 +1113,13 @@ class NGIApp(QMainWindow):
             """)
             if key=="fpd": btn.setChecked(True)
             self.scatter_param_grp.addButton(btn)
-            self._sc_param_btns[key]=btn
-            row1.addWidget(btn)
-        row1.addStretch()
-        sc_vl.addLayout(row1)
-        # Satır 2: alt ölçek butonları (FPD/FPF için)
+            self._sc_param_btns[key]=btn; row1.addWidget(btn)
+        row1.addStretch(); sc_vl.addLayout(row1)
         row2=QHBoxLayout(); row2.setSpacing(4)
-        row2.addWidget(QLabel("Alt ölçek:"))
-        self.scatter_scale_grp=QButtonGroup(self)
-        self._sc_scale_btns={}
+        row2.addWidget(QLabel("Alt olcek:"))
+        self.scatter_scale_grp=QButtonGroup(self); self._sc_scale_btns={}
         for key,lbl in [("5","5 µm"),("3","3 µm"),("15","1,5 µm")]:
-            btn=QPushButton(lbl); btn.setCheckable(True)
-            btn.setFixedHeight(24)
+            btn=QPushButton(lbl); btn.setCheckable(True); btn.setFixedHeight(24)
             btn.setStyleSheet("""
                 QPushButton{background:#141824;border:1px solid #2a4060;border-radius:4px;
                     color:#7090b0;font-size:11px;padding:0 10px;}
@@ -1127,20 +1128,14 @@ class NGIApp(QMainWindow):
             """)
             if key=="5": btn.setChecked(True)
             self.scatter_scale_grp.addButton(btn)
-            self._sc_scale_btns[key]=btn
-            row2.addWidget(btn)
+            self._sc_scale_btns[key]=btn; row2.addWidget(btn)
         row2.addStretch()
-        self.sc_row2_widget=QWidget()
-        self.sc_row2_widget.setLayout(row2)
-        sc_vl.addWidget(self.sc_row2_widget)
-        sl.addWidget(sc_ctrl)
-        # Grafik + seri listesi yan yana
+        self.sc_row2_widget=QWidget(); self.sc_row2_widget.setLayout(row2)
+        sc_vl.addWidget(self.sc_row2_widget); sl.addWidget(sc_ctrl)
         sc_body=QHBoxLayout(); sc_body.setSpacing(6)
         self.scatter_canvas=FigureCanvas(Figure(figsize=(8,5), facecolor=BG))
         sc_body.addWidget(self.scatter_canvas, 1)
-        # Seri seçim paneli
-        sc_ser_frame=QFrame()
-        sc_ser_frame.setFixedWidth(180)
+        sc_ser_frame=QFrame(); sc_ser_frame.setFixedWidth(180)
         sc_ser_frame.setStyleSheet(
             f"background:{BG3};border-radius:4px;border:1px solid #2a4060;")
         sc_ser_vl=QVBoxLayout(sc_ser_frame)
@@ -1150,15 +1145,14 @@ class NGIApp(QMainWindow):
             f"color:{GOLD};font-weight:bold;font-size:12px;background:transparent;")
         sc_ser_vl.addWidget(sc_ser_title)
         sc_btn_row=QHBoxLayout(); sc_btn_row.setSpacing(4)
-        sc_all=QPushButton("Tümü ✓"); sc_all.setFixedHeight(22)
+        sc_all=QPushButton("Tumu ✓"); sc_all.setFixedHeight(22)
         sc_all.setStyleSheet("font-size:10px;")
         sc_all.clicked.connect(self._scatter_sel_all)
-        sc_none=QPushButton("Tümü ✕"); sc_none.setFixedHeight(22)
+        sc_none=QPushButton("Tumu ✕"); sc_none.setFixedHeight(22)
         sc_none.setStyleSheet("font-size:10px;background:#3a1a1a;")
         sc_none.clicked.connect(self._scatter_sel_none)
         sc_btn_row.addWidget(sc_all); sc_btn_row.addWidget(sc_none)
         sc_ser_vl.addLayout(sc_btn_row)
-        # Seri listesi (scroll)
         sc_ser_scroll=QScrollArea(); sc_ser_scroll.setWidgetResizable(True)
         sc_ser_scroll.setStyleSheet("background:transparent;border:none;")
         self._sc_ser_container=QWidget()
@@ -1170,15 +1164,13 @@ class NGIApp(QMainWindow):
         sc_ser_vl.addWidget(sc_ser_scroll, 1)
         sc_body.addWidget(sc_ser_frame)
         sl.addLayout(sc_body, 1)
-        self.tabs.addTab(self.tab_summary, self.T["tab_summary"])
-        self.tabs.addTab(self.tab_scatter, "Nokta Grafik")
-        # Parametre/ölçek değişince yeniden çiz
+        self.tabs.addTab(self.tab_scatter, self.T.get("tab_scatter","Nokta Grafik"))
         for btn in self._sc_param_btns.values():
             btn.toggled.connect(lambda c: self._on_scatter_param() if c else None)
         for btn in self._sc_scale_btns.values():
             btn.toggled.connect(lambda c: self._plot_scatter() if c else None)
 
-        # Log-Probit
+        # ── TAB 2: Log-Probit ────────────────────────────────────────────────
         self.tab_lp=QWidget()
         lpl=QVBoxLayout(self.tab_lp); lpl.setContentsMargins(4,4,4,4); lpl.setSpacing(4)
         lp_ctrl=QHBoxLayout()
@@ -1189,18 +1181,17 @@ class NGIApp(QMainWindow):
         lpl.addLayout(lp_ctrl)
         self.lp_canvas=FigureCanvas(Figure(figsize=(9,5), facecolor=BG))
         lpl.addWidget(self.lp_canvas,1)
-        # Bilgi etiketi - grafiğin altında
         self.lp_info_lbl=QLabel("")
         self.lp_info_lbl.setVisible(False)
         self.lp_info_lbl.setTextFormat(Qt.TextFormat.RichText)
         self.lp_info_lbl.setWordWrap(True)
         self.lp_info_lbl.setStyleSheet(
             f"background:#111827;color:#90c0e0;font-size:11px;"
-            f"padding:6px 10px;border-top:1px solid #1a2a40;border-radius:0 0 4px 4px;")
+            f"padding:6px 10px;border-top:1px solid #1a2a40;")
         lpl.addWidget(self.lp_info_lbl)
         self.tabs.addTab(self.tab_lp, self.T["tab_plot"])
 
-        # Dağılım — tüm sekme scroll içinde
+        # ── TAB 3: Dağılım ───────────────────────────────────────────────────
         self.tab_dist=QWidget()
         dist_outer=QVBoxLayout(self.tab_dist)
         dist_outer.setContentsMargins(0,0,0,0); dist_outer.setSpacing(0)
@@ -1220,7 +1211,7 @@ class NGIApp(QMainWindow):
             self.lim_grp.addButton(rb)
             if val=="ema": rb.setChecked(True)
             rb.toggled.connect(lambda c,v=val:
-                (setattr(self,'limit_type',v) or self._plot_dist())
+                (setattr(self,"limit_type",v) or self._plot_dist())
                 if c and self.all_series else None)
             limhl.addWidget(rb)
         limhl.addWidget(QLabel(self.T["lim_pct"]))
@@ -1232,7 +1223,6 @@ class NGIApp(QMainWindow):
         self.dist_canvas=FigureCanvas(Figure(figsize=(9,5), facecolor=BG))
         self.dist_canvas.setMinimumHeight(420)
         dl.addWidget(self.dist_canvas)
-        # Uyarı scroll
         self.warn_scroll=QScrollArea(); self.warn_scroll.setWidgetResizable(True)
         self.warn_scroll.setMaximumHeight(160); self.warn_scroll.setVisible(False)
         self.warn_scroll.setStyleSheet("background:#1a0a0a;border:none;")
@@ -1241,20 +1231,11 @@ class NGIApp(QMainWindow):
         self.warn_layout.setContentsMargins(6,4,6,4); self.warn_layout.setSpacing(3)
         self.warn_scroll.setWidget(self.warn_container)
         dl.addWidget(self.warn_scroll)
-        dist_inner.setLayout(dl)
         dist_scroll.setWidget(dist_inner)
         dist_outer.addWidget(dist_scroll)
         self.tabs.addTab(self.tab_dist, self.T["tab_dist"])
 
-        # Özet
-        self.tab_summary=QScrollArea(); self.tab_summary.setWidgetResizable(True)
-        self.summary_widget=QWidget()
-        self.summary_layout=QVBoxLayout(self.summary_widget)
-        self.summary_layout.setSpacing(6); self.summary_layout.setContentsMargins(8,8,8,8)
-        self.summary_layout.addStretch()
-        self.tab_summary.setWidget(self.summary_widget)
-
-        # Karşılaştırma
+        # ── TAB 4: Karşılaştırma ─────────────────────────────────────────────
         self.tab_compare=QScrollArea(); self.tab_compare.setWidgetResizable(True)
         self.compare_widget=QWidget()
         self.compare_layout=QVBoxLayout(self.compare_widget)
@@ -1263,7 +1244,7 @@ class NGIApp(QMainWindow):
         self.tab_compare.setWidget(self.compare_widget)
         self.tabs.addTab(self.tab_compare, self.T["tab_compare"])
 
-    # ── Yardımcı ──────────────────────────────────────────────────────────────
+
     def _refresh_cutoffs(self):
         for i in reversed(range(self.cbox_layout.count())):
             w=self.cbox_layout.itemAt(i).widget()
