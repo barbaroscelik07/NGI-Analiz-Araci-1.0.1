@@ -119,27 +119,11 @@ def calc_run(masses, flow, lo=15, hi=85, delivered_tp=False):
     fpd   = d5u /100*ism; fpf   = fpd /metered*100 if metered>0 else 0
     fpd3  = d3u /100*ism; fpf3  = fpd3/metered*100 if metered>0 else 0
     fpd15 = d15u/100*ism; fpf15 = fpd15/metered*100 if metered>0 else 0
-    # D10 / D50 / D90 — kümülatif eğriden log-interp
-    def _dv_at(target_pct):
-        """Diameter at target cumulative % (log interpolation on pts_all)"""
-        for i in range(len(pts_all)-1):
-            d1,u1 = pts_all[i]; d2,u2 = pts_all[i+1]
-            if u1 <= target_pct <= u2 and u2 > u1:
-                t = (target_pct - u1) / (u2 - u1)
-                return 10**(math.log10(d1) + t*(math.log10(d2)-math.log10(d1)))
-        # Fallback: regresyon
-        try:
-            return 10**((norm.ppf(target_pct/100) - a) / b)
-        except: return None
-    d10 = _dv_at(10.0)
-    d50 = _dv_at(50.0)  # MMAD ile aynı
-    d90 = _dv_at(90.0)
     res.update({"n":len(valid),"a":a,"b":b,"slope":b,"intercept":a+5,"r2":r2,
                 "mmad":mmad,"gsd":gsd,
                 "fpd":fpd,"fpf":fpf,
                 "fpd3":fpd3,"fpf3":fpf3,
                 "fpd15":fpd15,"fpf15":fpf15,
-                "d10":d10,"d50":d50,"d90":d90,
                 "x_reg":x,"y_reg":y})
     return res
 
@@ -151,7 +135,7 @@ def calc_series_avg(runs):
         vals=[r["masses"].get(s,0) for r in valid]
         avg_masses[s]=float(np.mean(vals))
     params={}
-    for p in ["mmad","gsd","fpd","fpf","fpd3","fpf3","fpd15","fpf15","d10","d50","d90","metered","delivered","slope","intercept","r2"]:
+    for p in ["mmad","gsd","fpd","fpf","fpd3","fpf3","fpd15","fpf15","metered","delivered","slope","intercept","r2"]:
         vals=[r[p] for r in valid if p in r]
         if vals:
             m=float(np.mean(vals)); sd=float(np.std(vals,ddof=1)) if len(vals)>1 else 0.0
@@ -250,7 +234,7 @@ L = {
  "calculate":"Hesapla","clear":"Temizle","export_pdf":"PDF Rapor",
  "load_csv":"CSV Yukle",
  "tab_scatter":"Nokta Grafik","tab_plot":"Log-Probit",
- "tab_dist":"Dagilim","tab_summary":"Ozet","tab_compare":"Karsilastirma",
+ "tab_dist":"Dagilim","tab_summary":"Sonuclar","tab_compare":"Karsilastirma",
  "series":"Seri","run":"Run","paste_btn":"Yapistir",
  "mean":"Ort.","sd":"SD","rsd":"RSD%","accept":"Kabul",
  "metered":"Metered (mg)","delivered":"Delivered (mg)",
@@ -284,7 +268,7 @@ L = {
  "calculate":"Calculate","clear":"Clear","export_pdf":"PDF Report",
  "load_csv":"Load CSV",
  "tab_scatter":"Scatter Plot","tab_plot":"Log-Probit",
- "tab_dist":"Distribution","tab_summary":"Summary","tab_compare":"Compare",
+ "tab_dist":"Distribution","tab_summary":"Results","tab_compare":"Compare",
  "series":"Series","run":"Run","paste_btn":"Paste",
  "mean":"Mean","sd":"SD","rsd":"RSD%","accept":"Accept",
  "metered":"Metered (mg)","delivered":"Delivered (mg)",
@@ -321,6 +305,143 @@ TXT   = "#e0eaf8"
 TXT2  = "#7090b0"
 GREEN = "#1a5a1a"
 RED   = "#5a1a1a"
+
+# ── Tema renkleri ─────────────────────────────────────────────────────────────
+_THEME = "dark"  # "dark" veya "light"
+
+DARK_COLORS = {
+    "BG": "#0e1219", "BG2": "#141824", "BG3": "#1c2336",
+    "TXT": "#e0eaf8", "TXT2": "#7090b0",
+    "PLOT_BG": "#0e1525", "PLOT_FG": "#0e1219",
+    "TABLE_HDR": "#1F4E79", "TABLE_ROW1": "#1a1a2a",
+}
+LIGHT_COLORS = {
+    "BG": "#f0f4f8", "BG2": "#e4eaf2", "BG3": "#d8e0eb",
+    "TXT": "#1a2a3a", "TXT2": "#4a6080",
+    "PLOT_BG": "#f8faff", "PLOT_FG": "#f0f4f8",
+    "TABLE_HDR": "#2E75B6", "TABLE_ROW1": "#dde8f5",
+}
+
+def get_theme_colors():
+    return LIGHT_COLORS if _THEME == "light" else DARK_COLORS
+
+def build_style():
+    C = get_theme_colors()
+    BG=C["BG"]; BG2=C["BG2"]; BG3=C["BG3"]
+    TXT=C["TXT"]; TXT2=C["TXT2"]
+    return f"""
+QMainWindow, QDialog {{
+    background: {BG};
+}}
+QWidget {{
+    background: {BG};
+    color: {TXT};
+    font-family: 'Segoe UI', 'Arial';
+    font-size: 13px;
+}}
+QLabel {{
+    color: {TXT};
+    background: transparent;
+}}
+QLineEdit {{
+    background: {BG3};
+    border: 1px solid #2a4060;
+    border-radius: 4px;
+    padding: 3px 6px;
+    color: {TXT};
+}}
+QLineEdit:focus {{ border: 1px solid {GOLD}; }}
+QPushButton {{
+    background: {BG3};
+    border: 1px solid #2a4060;
+    border-radius: 5px;
+    padding: 5px 12px;
+    color: {TXT};
+    font-weight: bold;
+}}
+QPushButton:hover {{ background: #253a5e; border-color: {GOLD}; }}
+QPushButton:pressed {{ background: {BG2}; }}
+QPushButton#btn_calc {{ background: #1a5a1a; border-color: #2a8a2a; color: white; }}
+QPushButton#btn_calc:hover {{ background: #2a8a2a; }}
+QPushButton#btn_pdf {{ background: #3a1a5a; border-color: #6a20a0; color: white; }}
+QPushButton#btn_pdf:hover {{ background: #5a2a8a; }}
+QPushButton#btn_csv {{ background: #0a4a3a; border-color: #0a8a6a; color: white; }}
+QPushButton#btn_csv:hover {{ background: #0a7a5a; }}
+QComboBox {{
+    background: {BG3};
+    border: 1px solid #2a4060;
+    border-radius: 4px;
+    padding: 3px 6px;
+    color: {TXT};
+}}
+QComboBox:focus {{ border-color: {GOLD}; }}
+QComboBox QAbstractItemView {{
+    background: {BG2};
+    border: 1px solid #2a4060;
+    color: {TXT};
+    selection-background-color: #1a2e4a;
+}}
+QComboBox::drop-down {{ border: none; width: 20px; }}
+QCheckBox {{ color: {TXT2}; spacing: 6px; }}
+QCheckBox::indicator {{
+    width: 14px; height: 14px;
+    border: 1px solid #2a4060;
+    border-radius: 3px;
+    background: {BG3};
+}}
+QCheckBox::indicator:checked {{ background: #1a2e4a; border-color: {GOLD}; }}
+QRadioButton {{ color: {TXT2}; spacing: 6px; }}
+QRadioButton::indicator {{
+    width: 13px; height: 13px;
+    border: 1px solid #2a4060;
+    border-radius: 7px;
+    background: {BG3};
+}}
+QRadioButton::indicator:checked {{ background: {GOLD}; border-color: {GOLD}; }}
+QTabWidget::pane {{ border: 1px solid #2a4060; background: {BG}; }}
+QTabBar::tab {{
+    background: {BG3};
+    color: {TXT2};
+    border: 1px solid #2a4060;
+    border-bottom: none;
+    padding: 8px 16px;
+    margin-right: 2px;
+    border-radius: 4px 4px 0 0;
+    font-size: 13px;
+}}
+QTabBar::tab:selected {{ background: #2E75B6; color: white; font-weight: bold; }}
+QTabBar::tab:hover:!selected {{ background: #1a2e4a; color: {TXT}; }}
+QScrollArea {{ border: none; background: {BG}; }}
+QScrollBar:vertical {{
+    background: {BG2}; width: 8px; border-radius: 4px;
+}}
+QScrollBar::handle:vertical {{
+    background: #2a4060; border-radius: 4px; min-height: 20px;
+}}
+QScrollBar::handle:vertical:hover {{ background: #3a6090; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
+QScrollBar:horizontal {{
+    background: {BG2}; height: 8px; border-radius: 4px;
+}}
+QScrollBar::handle:horizontal {{
+    background: #2a4060; border-radius: 4px; min-width: 20px;
+}}
+QScrollBar::handle:horizontal:hover {{ background: #3a6090; }}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0px; }}
+QGroupBox {{
+    border: 1px solid #2a4060; border-radius: 6px;
+    margin-top: 8px; padding-top: 6px;
+    color: {TXT2}; font-size: 10px;
+}}
+QSplitter::handle {{ background: #2a4060; width: 2px; }}
+QListWidget {{
+    background: {BG3}; border: 1px solid #2a4060;
+    color: {TXT};
+}}
+QListWidget::item:selected {{ background: #1a2e4a; color: white; }}
+"""
+
+STYLE = build_style()
 
 STYLE = f"""
 QMainWindow, QDialog {{
@@ -835,6 +956,15 @@ class NGIApp(QMainWindow):
             "color:#aac8e8;border-radius:3px;font-size:11px;")
         self.btn_lang.clicked.connect(self._toggle_lang)
         hl.addWidget(self.btn_lang)
+        # Tema toggle butonu
+        self.btn_theme=QPushButton("☀")
+        self.btn_theme.setFixedSize(32,26)
+        self.btn_theme.setToolTip("Açık / Koyu Tema")
+        self.btn_theme.setStyleSheet(
+            "background:#001a40;border:1px solid #2a4060;"
+            "color:#FFC600;border-radius:3px;font-size:14px;")
+        self.btn_theme.clicked.connect(self._toggle_theme)
+        hl.addWidget(self.btn_theme)
         return h
 
     def _build_left(self, layout):
@@ -1097,7 +1227,7 @@ class NGIApp(QMainWindow):
         self.summary_layout.setSpacing(6); self.summary_layout.setContentsMargins(8,8,8,8)
         self.summary_layout.addStretch()
         self.tab_summary.setWidget(self.summary_widget)
-        self.tabs.addTab(self.tab_summary, self.T["tab_summary"])
+        # ADDTAB_REMOVED: self.tabs.addTab(self.tab_summary, self.T["tab_summary"])
 
         # ── TAB 1: Nokta Grafik ──────────────────────────────────────────────
         self.tab_scatter=QWidget()
@@ -1109,8 +1239,7 @@ class NGIApp(QMainWindow):
         row1.addWidget(QLabel("Parametre:"))
         self.scatter_param_grp=QButtonGroup(self)
         self._sc_param_btns={}
-        for key,lbl in [("fpd","FPD"),("fpf","FPF"),("mmad","MMAD"),("gsd","GSD"),
-                          ("d10","D10"),("d50","D50"),("d90","D90")]:
+        for key,lbl in [("fpd","FPD"),("fpf","FPF"),("mmad","MMAD"),("gsd","GSD")]:
             btn=QPushButton(lbl); btn.setCheckable(True); btn.setFixedHeight(26)
             btn.setStyleSheet("""
                 QPushButton{background:#1a2a4a;border:1px solid #2a4060;border-radius:4px;
@@ -1171,7 +1300,7 @@ class NGIApp(QMainWindow):
         sc_ser_vl.addWidget(sc_ser_scroll, 1)
         sc_body.addWidget(sc_ser_frame)
         sl.addLayout(sc_body, 1)
-        self.tabs.addTab(self.tab_scatter, self.T.get("tab_scatter","Nokta Grafik"))
+        # ADDTAB_REMOVED: self.tabs.addTab(self.tab_scatter, self.T.get("tab_scatter","Nokta Grafik"))
         for btn in self._sc_param_btns.values():
             btn.toggled.connect(lambda c: self._on_scatter_param() if c else None)
         for btn in self._sc_scale_btns.values():
@@ -1196,7 +1325,7 @@ class NGIApp(QMainWindow):
             f"background:#111827;color:#90c0e0;font-size:11px;"
             f"padding:6px 10px;border-top:1px solid #1a2a40;")
         lpl.addWidget(self.lp_info_lbl)
-        self.tabs.addTab(self.tab_lp, self.T["tab_plot"])
+        # ADDTAB_REMOVED: self.tabs.addTab(self.tab_lp, self.T["tab_plot"])
 
         # ── TAB 3: Dağılım ───────────────────────────────────────────────────
         self.tab_dist=QWidget()
@@ -1240,7 +1369,7 @@ class NGIApp(QMainWindow):
         dl.addWidget(self.warn_scroll)
         dist_scroll.setWidget(dist_inner)
         dist_outer.addWidget(dist_scroll)
-        self.tabs.addTab(self.tab_dist, self.T["tab_dist"])
+        # ADDTAB_REMOVED: self.tabs.addTab(self.tab_dist, self.T["tab_dist"])
 
         # ── TAB 4: Karşılaştırma ─────────────────────────────────────────────
         self.tab_compare=QScrollArea(); self.tab_compare.setWidgetResizable(True)
@@ -1249,7 +1378,13 @@ class NGIApp(QMainWindow):
         self.compare_layout.setSpacing(6); self.compare_layout.setContentsMargins(8,8,8,8)
         self.compare_layout.addStretch()
         self.tab_compare.setWidget(self.compare_widget)
-        self.tabs.addTab(self.tab_compare, self.T["tab_compare"])
+        # Sekmeler doğru sıraya ekleniyor:
+        # 0: Sonuçlar, 1: Dağılım, 2: Nokta Grafik, 3: Log-Probit, 4: Karşılaştırma
+        self.tabs.addTab(self.tab_summary,  self.T["tab_summary"])
+        self.tabs.addTab(self.tab_dist,     self.T["tab_dist"])
+        self.tabs.addTab(self.tab_scatter,  self.T.get("tab_scatter","Nokta Grafik"))
+        self.tabs.addTab(self.tab_lp,       self.T["tab_plot"])
+        self.tabs.addTab(self.tab_compare,  self.T["tab_compare"])
 
 
     def _refresh_cutoffs(self):
@@ -1318,6 +1453,28 @@ class NGIApp(QMainWindow):
         return [sd for sd,p in zip(self.all_series, self.series_panels)
                 if p.vis_check.isChecked()]
 
+    def _toggle_theme(self):
+        global _THEME, STYLE, BG, BG2, BG3, TXT, TXT2
+        _THEME = "light" if _THEME == "dark" else "dark"
+        C = get_theme_colors()
+        BG=C["BG"]; BG2=C["BG2"]; BG3=C["BG3"]
+        TXT=C["TXT"]; TXT2=C["TXT2"]
+        STYLE = build_style()
+        QApplication.instance().setStyleSheet(STYLE)
+        # Buton ikonunu güncelle
+        self.btn_theme.setText("🌙" if _THEME == "light" else "☀")
+        # Grafikleri yeniden çiz
+        if self.all_series:
+            cur = self.tabs.currentIndex()
+            if cur==1: self._plot_dist()
+            elif cur==2: self._plot_scatter()
+            elif cur==3: self._plot_lp()
+        # Grafik canvas arka planlarını güncelle
+        plot_bg = C["PLOT_BG"]
+        for canvas in [self.lp_canvas, self.dist_canvas, self.scatter_canvas]:
+            canvas.figure.patch.set_facecolor(plot_bg)
+            canvas.draw()
+
     def _toggle_lang(self):
         self.lang="EN" if self.lang=="TR" else "TR"
         self.T=L[self.lang]; T=self.T
@@ -1338,15 +1495,15 @@ class NGIApp(QMainWindow):
         except: pass
         self._refresh_cutoffs()
         for p in self.series_panels: p.update_lang(T)
-        for i,k in enumerate(["tab_summary","tab_scatter","tab_plot","tab_dist","tab_compare"]):
+        for i,k in enumerate(["tab_summary","tab_dist","tab_scatter","tab_plot","tab_compare"]):
             self.tabs.setTabText(i, T[k])
         self._update_series_count()
         if self.all_series:
             cur=self.tabs.currentIndex()
             if cur==0: self._show_summary()
-            elif cur==1: self._plot_scatter()
-            elif cur==2: self._plot_lp()
-            elif cur==3: self._plot_dist()
+            elif cur==1: self._plot_dist()
+            elif cur==2: self._plot_scatter()
+            elif cur==3: self._plot_lp()
             elif cur==4: self._show_compare()
 
     def _clear(self):
@@ -1403,9 +1560,9 @@ class NGIApp(QMainWindow):
         self._rebuild_scatter_series_list()
         cur=self.tabs.currentIndex()
         if cur==0: self._show_summary()
-        elif cur==1: self._plot_scatter()
-        elif cur==2: self._plot_lp()
-        elif cur==3: self._plot_dist()
+        elif cur==1: self._plot_dist()
+        elif cur==2: self._plot_scatter()
+        elif cur==3: self._plot_lp()
         elif cur==4: self._show_compare()
         self.status_lbl.setText(self.T["status_done"])
 
@@ -1421,9 +1578,9 @@ class NGIApp(QMainWindow):
     def _on_tab_change(self, idx):
         if not self.all_series: return
         if idx==0: self._show_summary()
-        elif idx==1: self._plot_scatter()
-        elif idx==2: self._plot_lp()
-        elif idx==3: self._plot_dist()
+        elif idx==1: self._plot_dist()
+        elif idx==2: self._plot_scatter()
+        elif idx==3: self._plot_lp()
         elif idx==4: self._show_compare()
 
     # ── Sonuçlar ──────────────────────────────────────────────────────────────
@@ -1504,17 +1661,15 @@ class NGIApp(QMainWindow):
             return f"FPF ≤{d} µm [%]"
         elif param == "mmad": return "MMAD [µm]"
         elif param == "gsd":  return "GSD"
-        elif param == "d10":  return "D10 [µm]"
-        elif param == "d50":  return "D50 [µm]"
-        elif param == "d90":  return "D90 [µm]"
+
         return param
 
     def _plot_scatter(self):
         if not self.all_series: return
         plt.close("all")
         fig=self.scatter_canvas.figure; fig.clear()
-        fig.patch.set_facecolor(BG)
-        ax=fig.add_subplot(111); ax.set_facecolor("#0e1525")
+        C=get_theme_colors(); fig.patch.set_facecolor(C["BG"])
+        ax=fig.add_subplot(111); ax.set_facecolor(C["PLOT_BG"])
 
         key=self._get_scatter_key()
         lbl=self._get_scatter_label()
@@ -1535,7 +1690,7 @@ class NGIApp(QMainWindow):
 
         if not visible:
             ax.text(0.5,0.5,"Seri seçilmedi",transform=ax.transAxes,
-                ha="center",va="center",color=TXT2,fontsize=13)
+                ha="center",va="center",color=C["TXT2"],fontsize=13)
             fig.tight_layout(); self.scatter_canvas.draw(); return
 
         n=len(visible)
@@ -1617,8 +1772,9 @@ class NGIApp(QMainWindow):
     # ── Log-Probit ────────────────────────────────────────────────────────────
     def _plot_lp(self):
         plt.close("all")
-        fig=self.lp_canvas.figure; fig.clear(); fig.patch.set_facecolor(BG)
-        ax=fig.add_subplot(111); ax.set_facecolor("#0e1525")
+        fig=self.lp_canvas.figure; fig.clear()
+        C=get_theme_colors(); fig.patch.set_facecolor(C["BG"])
+        ax=fig.add_subplot(111); ax.set_facecolor(C["PLOT_BG"])
         flow=int(self.flow_combo.currentText())
         avg_only=self.chk_lp_avg.isChecked() or len(self.all_series)>=4
         if avg_only and not self.chk_lp_avg.isChecked():
@@ -1647,8 +1803,8 @@ class NGIApp(QMainWindow):
                     xr=np.linspace(min(run["x_reg"])-0.1,max(run["x_reg"])+0.1,50)
                     ax.plot(xr,run["a"]+run["b"]*xr,"-",color=col,lw=lw,alpha=0.7,
                         label=f"{sd['name']} R{run['run_no']}")
-        ax.set_xlabel("log₁₀(D50, µm)",color=TXT2,fontsize=13)
-        ax.set_ylabel("Probit z",color=TXT2,fontsize=13)
+        ax.set_xlabel("log₁₀(D50, µm)",color=C["TXT2"],fontsize=13)
+        ax.set_ylabel("Probit z",color=C["TXT2"],fontsize=13)
         ax.set_title(f"Log-Probit  [{flow} L/min]",color=GOLD,fontsize=14,fontweight="bold")
         ax.tick_params(colors=TXT2,labelsize=11)
         for sp in ax.spines.values(): sp.set_color("#2a4060")
@@ -1670,9 +1826,7 @@ class NGIApp(QMainWindow):
                     f"<span style='color:{sd['color']};font-weight:bold;'>{sd['name']}</span>"
                     f"&nbsp;&nbsp;MMAD={fmt_num(pr['mmad'][0],3,ds)}"
                     f"&nbsp;GSD={fmt_num(pr['gsd'][0],3,ds)}"
-                    f"&nbsp;D10={fmt_num(pr.get('d10',(0,))[0],3,ds)}"
-                    f"&nbsp;D50={fmt_num(pr.get('d50',(0,))[0],3,ds)}"
-                    f"&nbsp;D90={fmt_num(pr.get('d90',(0,))[0],3,ds)}"
+
                     f"&nbsp;Slope={fmt_num(pr['slope'][0],3,ds)}"
                     f"&nbsp;R²={fmt_num(pr['r2'][0],4,ds)}")
             try:
@@ -1693,8 +1847,9 @@ class NGIApp(QMainWindow):
         lm={"ema":20,"fda":15,"usp":25}
         try: pct=lm.get(self.limit_type) or float(self.e_lim_pct.text())
         except: pct=20
-        fig=self.dist_canvas.figure; fig.clear(); fig.patch.set_facecolor(BG)
-        ax=fig.add_subplot(111); ax.set_facecolor("#0e1525")
+        fig=self.dist_canvas.figure; fig.clear()
+        C=get_theme_colors(); fig.patch.set_facecolor(C["BG"])
+        ax=fig.add_subplot(111); ax.set_facecolor(C["PLOT_BG"])
         ref_masses=None; warnings=[]
         for sd in self._visible_series():
             if not sd["avg"]: continue
@@ -1734,8 +1889,8 @@ class NGIApp(QMainWindow):
         ax.tick_params(colors=TXT2,labelsize=11)
         for sp in ax.spines.values(): sp.set_color("#2a4060")
         ylbl="Ort. Kutle (mg/atis)" if self.lang=="TR" else "Mean Mass (mg/actuation)"
-        ax.set_xlabel(self.T["stage"],color=TXT2,fontsize=13)
-        ax.set_ylabel(ylbl,color=TXT2,fontsize=13)
+        ax.set_xlabel(self.T["stage"],color=C["TXT2"],fontsize=13)
+        ax.set_ylabel(ylbl,color=C["TXT2"],fontsize=13)
         ttl=f"APSD [{flow} L/min] Ort±SD"
         if ref_masses: ttl+=f"  |  Limit ±{pct:.0f}%"
         ax.set_title(ttl,color=GOLD,fontsize=13,fontweight="bold")
@@ -1775,7 +1930,6 @@ class NGIApp(QMainWindow):
             ("fpd3","FPD (3µm) [mg]"),("fpf3","FPF (3µm) [%]"),
             ("fpd15","FPD (1.5µm) [mg]"),("fpf15","FPF (1.5µm) [%]"),
             ("mmad","MMAD (µm)"),("gsd","GSD"),
-            ("d10","D10 (µm)"),("d50","D50 (µm)"),("d90","D90 (µm)"),
             ("slope",T["slope_lbl"]),("intercept",T["int_lbl"]),("r2",T["r2_lbl"])]
         for sd in self.all_series:
             rt=f"  [{T['ref_label']}]" if sd["is_ref"] else ""
@@ -1802,7 +1956,7 @@ class NGIApp(QMainWindow):
                 if not vals: continue
                 mv=float(np.mean(vals)); sv=float(np.std(vals,ddof=1)) if len(vals)>1 else 0.0
                 rv2=sv/mv*100 if mv else 0.0; pf=rv2<=rsd_lim
-                ik=key in("fpd","fpf","fpd3","fpf3","fpd15","fpf15","mmad","gsd","d10","d50","d90")
+                ik=key in("fpd","fpf","fpd3","fpf3","fpd15","fpf15","mmad","gsd")
                 bg="#1a1a2a" if i2%2==0 else "transparent"
                 dr=QFrame(); dr.setStyleSheet(f"background:{bg};")
                 dfl=QHBoxLayout(dr); dfl.setContentsMargins(2,1,2,1); dfl.setSpacing(0)
@@ -1871,7 +2025,6 @@ class NGIApp(QMainWindow):
         ref_sd=next((sd for sd in vis_ser if sd["is_ref"]),None)
         params_list=[
             ("mmad","MMAD (µm)"),("gsd","GSD"),
-            ("d10","D10 (µm)"),("d50","D50 (µm)"),("d90","D90 (µm)"),
             ("fpd",T["fp_dose"]+" (5µm)"),("fpf",T["fp_frac"]+" (5µm)"),
             ("fpd3","FPD (3µm)"),("fpf3","FPF (3µm)"),
             ("fpd15","FPD (1.5µm)"),("fpf15","FPF (1.5µm)"),
@@ -1891,7 +2044,7 @@ class NGIApp(QMainWindow):
             bg="#1a1a2a" if i2%2==0 else "transparent"
             dr=QFrame(); dr.setStyleSheet(f"background:{bg};")
             dfl=QHBoxLayout(dr); dfl.setContentsMargins(2,1,2,1); dfl.setSpacing(0)
-            ik=key in("mmad","gsd","d10","d50","d90","fpd","fpf","fpd3","fpf3","fpd15","fpf15")
+            ik=key in("mmad","gsd","fpd","fpf","fpd3","fpf3","fpd15","fpf15")
             l0=QLabel(lbl); l0.setFixedWidth(ws[0])
             l0.setStyleSheet(f"color:{'#FFC600' if ik else '#c0d0e0'};"
                 f"font-weight:{'bold' if ik else 'normal'};font-size:11px;background:transparent;")
@@ -2326,7 +2479,6 @@ def make_pdf_multi(path, all_series, meta, flow, T, limit_pct=20, rsd_lim=5.0, l
                  ("fpd3","FPD 3µm [mg]"),("fpf3","FPF 3µm [%]"),
                  ("fpd15","FPD 1.5µm [mg]"),("fpf15","FPF 1.5µm [%]"),
                  ("mmad","MMAD [um]"),("gsd","GSD"),
-                 ("d10","D10 [um]"),("d50","D50 [um]"),("d90","D90 [um]"),
                  ("slope","Slope"),("intercept","Intercept"),("r2","R^2")]
         p_hdr2 = ([Paragraph("Parameter",sLbl)] +
                   [Paragraph(f"Run {r['run_no']}",sLbl) for r in valid_runs] +
@@ -2339,7 +2491,7 @@ def make_pdf_multi(path, all_series, meta, flow, T, limit_pct=20, rsd_lim=5.0, l
             mean2=float(np.mean(vals2))
             sd2=float(np.std(vals2,ddof=1)) if len(vals2)>1 else 0.0
             rsd2=sd2/mean2*100 if mean2 else 0.0
-            is_key = k in ("fpd","fpf","fpd3","fpf3","fpd15","fpf15","mmad","gsd","d10","d50","d90")
+            is_key = k in ("fpd","fpf","fpd3","fpf3","fpd15","fpf15","mmad","gsd")
             sv = ps(7,True,colors.black,TA_CENTER) if is_key else sVal
             rsd_style = sRed if rsd2 > rsd_lim else sVal
             p_rows2.append(
