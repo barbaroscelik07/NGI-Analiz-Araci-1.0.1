@@ -174,8 +174,15 @@ def fmt_num(v, decimals=4, dec_sep=","):
     except: return str(v)
 
 def parse_csv(path):
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        raw = f.read()
+    for enc in ("utf-8-sig", "utf-8", "latin-1", "cp1252", "cp1254"):
+        try:
+            with open(path, newline="", encoding=enc) as f:
+                raw = f.read()
+            break
+        except (UnicodeDecodeError, LookupError):
+            raw = None
+    if raw is None:
+        return None, None, ["Dosya okunamadi: Desteklenmeyen karakter kodlaması"]
     lines = [l.strip() for l in raw.splitlines() if l.strip()]
     if not lines: return None, None, ["Dosya bos"]
     sep = ";" if raw.count(";") > raw.count(",") else ","
@@ -2529,7 +2536,7 @@ def make_pdf_multi(path, all_series, meta, flow, T, limit_pct=20, rsd_lim=5.0, l
     story.append(HRFlowable(width="100%", thickness=0.8, color=colors.black))
     story.append(Paragraph(
         f"NGI Analysis Tool v5  |  Ph.Eur 2.9.18 / USP &lt;601&gt;  |  "
-        f"Generated: {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+        f"Generated: {datetime.datetime.now().strftime('%d.%m.%Y %H:%M')}",
         ps(6.5, False, colors.black, TA_CENTER)))
 
     doc.build(story)
