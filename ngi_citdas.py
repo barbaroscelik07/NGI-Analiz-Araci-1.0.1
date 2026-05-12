@@ -2232,7 +2232,14 @@ class NGIApp(QMainWindow):
                         sys.executable if getattr(sys,"frozen",False) else __file__)),
                     "NGI_DoE_Analyzer.exe")
             if os.path.exists(doe_exe):
-                subprocess.Popen([doe_exe, path])
+                import platform
+                if platform.system() == "Windows":
+                    subprocess.Popen(
+                        [doe_exe, path],
+                        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+                    )
+                else:
+                    subprocess.Popen([doe_exe, path])
             else:
                 QMessageBox.information(self, "DoE",
                     "NGI_DoE_Analyzer.exe bulunamadi.\n"
