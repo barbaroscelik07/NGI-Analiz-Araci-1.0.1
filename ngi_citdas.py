@@ -258,6 +258,8 @@ L = {
  "csv_4runs":"Uyari: {s} serisi 3den fazla run iceriyor, ilk 3 alindi",
  "delivered_tp":"Delivered = T+P+ISM","lp_avg_only":"Sadece Seri Ortalamalari",
  "dec_sep":",",
+ "export_doe":"🔬 DoE'ye Gönder","doe_success":"DoE verisi dışa aktarıldı:\n{path}",
+ "doe_no_data":"Önce hesaplama yapın.","doe_open_ask":"DoE Analyzer'ı şimdi açmak ister misiniz?",
 },
 "EN":{
  "title":"NGI Cascade Impactor Analysis",
@@ -292,6 +294,8 @@ L = {
  "csv_4runs":"Warning: {s} has more than 3 runs, first 3 taken",
  "delivered_tp":"Delivered = T+P+ISM","lp_avg_only":"Series Averages Only",
  "dec_sep":".",
+ "export_doe":"🔬 Send to DoE","doe_success":"DoE data exported:\n{path}",
+ "doe_no_data":"Please calculate first.","doe_open_ask":"Open DoE Analyzer now?",
 }}
 
 # ─── Stil sabitleri ───────────────────────────────────────────────────────────
@@ -1172,6 +1176,12 @@ class NGIApp(QMainWindow):
         self.btn_csv.clicked.connect(self._load_csv)
         row2.addWidget(self.btn_csv)
         ol.addLayout(row2)
+
+        row3=QHBoxLayout(); row3.setSpacing(5)
+        self.btn_doe=make_btn(self.T["export_doe"],None,"rgba(10,50,80,0.8)")
+        self.btn_doe.clicked.connect(self._export_doe)
+        row3.addWidget(self.btn_doe)
+        ol.addLayout(row3)
         sec_ops["body"].addWidget(ops_w)
         vl.addWidget(sec_ops["outer"])
 
@@ -1486,6 +1496,7 @@ class NGIApp(QMainWindow):
         self.btn_clr.setText(T["clear"])
         self.btn_pdf.setText(T["export_pdf"])
         self.btn_csv.setText(T["load_csv"])
+        self.btn_doe.setText(T["export_doe"])
         self.btn_add.setText("+ "+T["add_series"])
         self.chk_lp_avg.setText(T["lp_avg_only"])
         self.chk_delivered_tp.setText(T["delivered_tp"])
@@ -2137,6 +2148,95 @@ class NGIApp(QMainWindow):
         n_r=sum(len(v["runs"]) for v in series_dict.values())
         self._update_series_count()
         self.status_lbl.setText(self.T["csv_loaded"].format(n=n_s,r=n_r))
+
+    # ── DoE Dışa Aktarma ──────────────────────────────────────────────────────
+    def _export_doe(self):
+        import json, subprocess
+        if not self.all_series:
+            QMessageBox.warning(self, "DoE", self.T.get("doe_no_data","Önce hesaplama yapın.")); return
+        flow, lo, hi = self._get_flow_lo_hi()
+        default_name = f"doe_data_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.json"
+        path, _ = QFileDialog.getSaveFileName(
+            self, "DoE Verisini Kaydet", default_name, "JSON (*.json)")
+        if not path: return
+        export = {
+            "export_info": {
+                "source": "NGI-CITDAS",
+                "version": "v6",
+                "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "product": self.e_product.text(),
+                "batch": self.e_batch.text(),
+                "operator": self.e_operator.text(),
+                "flow_rate": flow,
+                "valid_range": [lo, hi]
+            },
+            "series": []
+        }
+        for sd in self.all_series:
+            runs_out = []
+            for r in sd["runs"]:
+                if "error" in r:
+                    runs_out.append({"error": r["error"]}); continue
+                runs_out.append({
+                    "mmad":        round(r.get("mmad", 0), 4),
+                    "gsd":         round(r.get("gsd", 0), 4),
+                    "fpd_5um":     round(r.get("fpd", 0), 4),
+                    "fpf_5um":     round(r.get("fpf", 0), 4),
+                    "fpd_3um":     round(r.get("fpd3", 0), 4),
+                    "fpf_3um":     round(r.get("fpf3", 0), 4),
+                    "fpd_15um":    round(r.get("fpd15", 0), 4),
+                    "fpf_15um":    round(r.get("fpf15", 0), 4),
+                    "metered":     round(r.get("metered", 0), 4),
+                    "delivered":   round(r.get("delivered", 0), 4),
+                    "slope":       round(r.get("slope", 0), 4),
+                    "intercept":   round(r.get("intercept", 0), 4),
+                    "r2":          round(r.get("r2", 0), 4),
+                    "stage_deposits": {
+                        s: round(r.get("masses", {}).get(s, 0), 4)
+                        for s in ALL_KEYS
+                    }
+                })
+            avg_out = {}
+            if sd.get("avg"):
+                for p, (m, s, rsd) in sd["avg"]["params"].items():
+                    avg_out[p] = {"mean": round(m,4), "sd": round(s,4), "rsd": round(rsd,2)}
+            export["series"].append({
+                "series_id":         sd["name"],
+                "is_reference":      sd.get("is_ref", False),
+                "color":             sd.get("color", "#2E75B6"),
+                "n_valid_runs":      sd["avg"]["n_valid"] if sd.get("avg") else 0,
+                "runs":              runs_out,
+                "mean":              avg_out,
+                "avg_stage_deposits": {
+                    s: round(sd["avg"]["avg_masses"].get(s, 0), 4)
+                    for s in ALL_KEYS
+                } if sd.get("avg") else {}
+            })
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(export, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            QMessageBox.critical(self, "DoE Hatası", str(e)); return
+        success_msg = self.T.get("doe_success", "DoE verisi kaydedildi:").replace("{path}", path)
+        ask_msg = self.T.get("doe_open_ask", "DoE Analyzer’ı şimdi açmak ister misiniz?")
+        reply = QMessageBox.question(
+            self, "DoE Export",
+            success_msg + "\n\n" + ask_msg,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            doe_exe = os.path.join(os.path.dirname(path), "NGI_DoE_Analyzer.exe")
+            if not os.path.exists(doe_exe):
+                doe_exe = os.path.join(
+                    os.path.dirname(os.path.abspath(
+                        sys.executable if getattr(sys,"frozen",False) else __file__)),
+                    "NGI_DoE_Analyzer.exe")
+            if os.path.exists(doe_exe):
+                subprocess.Popen([doe_exe, path])
+            else:
+                QMessageBox.information(self, "DoE",
+                    "NGI_DoE_Analyzer.exe bulunamadi.\n"
+                    "Dosyayi manuel olarak acip JSON'u import edin:\n" + path)
 
     # ── PDF Rapor ─────────────────────────────────────────────────────────────
     def _export_pdf(self):
