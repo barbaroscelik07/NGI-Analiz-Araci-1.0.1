@@ -258,8 +258,6 @@ L = {
  "csv_4runs":"Uyari: {s} serisi 3den fazla run iceriyor, ilk 3 alindi",
  "delivered_tp":"Delivered = T+P+ISM","lp_avg_only":"Sadece Seri Ortalamalari",
  "dec_sep":",",
- "export_doe":"🔬 DoE'ye Gönder","doe_success":"DoE verisi dışa aktarıldı:\n{path}",
- "doe_no_data":"Önce hesaplama yapın.","doe_open_ask":"DoE Analyzer'ı şimdi açmak ister misiniz?",
 },
 "EN":{
  "title":"NGI Cascade Impactor Analysis",
@@ -294,8 +292,6 @@ L = {
  "csv_4runs":"Warning: {s} has more than 3 runs, first 3 taken",
  "delivered_tp":"Delivered = T+P+ISM","lp_avg_only":"Series Averages Only",
  "dec_sep":".",
- "export_doe":"🔬 Send to DoE","doe_success":"DoE data exported:\n{path}",
- "doe_no_data":"Please calculate first.","doe_open_ask":"Open DoE Analyzer now?",
 }}
 
 # ─── Stil sabitleri ───────────────────────────────────────────────────────────
@@ -643,6 +639,136 @@ QSplitter::handle {{
 """
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# GRAFİK VERİSİ THREAD — Numpy hesaplamalarını arka planda yapar
+# ═══════════════════════════════════════════════════════════════════════════════
+class PlotDataThread(QThread):
+    """Grafik için ağır numpy hesaplamalarını thread'de yapar.
+    Sonuçları sinyal ile gönderir, matplotlib çizimi ana thread'de yapılır."""
+    ready = pyqtSignal(dict)
+    error = pyqtSignal(str)
+
+    def __init__(self, plot_type, all_series, params):
+        super().__init__()
+        self.plot_type = plot_type
+        self.all_series = all_series
+        self.params = params
+
+    def run(self):
+        try:
+            if self.plot_type == "lp":
+                self._prepare_lp()
+            elif self.plot_type == "dist":
+                self._prepare_dist()
+            elif self.plot_type == "scatter":
+                self._prepare_scatter()
+        except Exception:
+            import traceback
+            self.error.emit(traceback.format_exc())
+
+    def _prepare_lp(self):
+        """Log-Probit için regresyon eğrisi noktalarını hesapla"""
+        avg_only = self.params.get("avg_only", True)
+        lo = self.params.get("lo", 15)
+        hi = self.params.get("hi", 85)
+        series_data = []
+        for sd in self.all_series:
+            vr = [r for r in sd["runs"] if "error" not in r]
+            if not vr: continue
+            lw = 2.5 if sd["is_ref"] else 1.5
+            if avg_only:
+                ml = min(len(r["x_reg"]) for r in vr)
+                avg_x = sum(r["x_reg"][:ml] for r in vr) / len(vr)
+                avg_y = sum(r["y_reg"][:ml] for r in vr) / len(vr)
+                ba = sum(r["b"] for r in vr) / len(vr)
+                aa = sum(r["a"] for r in vr) / len(vr)
+                xr = np.linspace(min(avg_x)-0.15, max(avg_x)+0.15, 60)
+                yr = aa + ba * xr
+                mmad_log = None
+                if sd["avg"] and "mmad" in sd["avg"]["params"]:
+                    mv = sd["avg"]["params"]["mmad"][0]
+                    if mv > 0: mmad_log = math.log10(mv)
+                series_data.append({
+                    "name": sd["name"], "color": sd["color"],
+                    "is_ref": sd["is_ref"], "lw": lw,
+                    "pts_x": avg_x.tolist(), "pts_y": avg_y.tolist(),
+                    "line_x": xr.tolist(), "line_y": yr.tolist(),
+                    "mmad_log": mmad_log, "mode": "avg"
+                })
+            else:
+                for run in vr:
+                    xr = np.linspace(min(run["x_reg"])-0.1, max(run["x_reg"])+0.1, 50)
+                    yr = run["a"] + run["b"] * xr
+                    series_data.append({
+                        "name": f"{sd['name']} R{run['run_no']}",
+                        "color": sd["color"], "is_ref": sd["is_ref"], "lw": lw,
+                        "pts_x": run["x_reg"].tolist(), "pts_y": run["y_reg"].tolist(),
+                        "line_x": xr.tolist(), "line_y": yr.tolist(),
+                        "mmad_log": None, "mode": "run"
+                    })
+            # Info etiketi için
+            if sd["avg"] and "slope" in sd["avg"]["params"]:
+                series_data[-1]["slope"] = sd["avg"]["params"]["slope"][0]
+                series_data[-1]["intercept"] = sd["avg"]["params"].get("intercept",(0,))[0]
+                series_data[-1]["mmad_val"] = sd["avg"]["params"].get("mmad",(0,))[0]
+                series_data[-1]["gsd_val"]  = sd["avg"]["params"].get("gsd",(0,))[0]
+                series_data[-1]["r2_val"]   = sd["avg"]["params"].get("r2",(0,))[0]
+        self.ready.emit({"type":"lp","series":series_data,"params":self.params})
+
+    def _prepare_dist(self):
+        """APSD için ortalama ve SD değerlerini hesapla"""
+        flow = self.params["flow"]
+        co = NGI_CUTOFFS[flow]
+        vis_all = ["Throat"] + [s for s in GRAPH_STAGES if co.get(s,999)<900]
+        series_data = []
+        ref_masses = None
+        for sd in self.all_series:
+            if not sd["avg"]: continue
+            ms = [sd["avg"]["avg_masses"].get(s,0) for s in vis_all]
+            vr = [r for r in sd["runs"] if "error" not in r]
+            sds = []
+            for s in vis_all:
+                vals = [r["masses"].get(s,0) for r in vr]
+                sds.append(float(np.std(vals,ddof=1)) if len(vals)>1 else 0.0)
+            series_data.append({
+                "name": sd["name"], "color": sd["color"],
+                "is_ref": sd["is_ref"],
+                "means": ms, "stds": sds
+            })
+            if sd["is_ref"]: ref_masses = sd["avg"]["avg_masses"]
+        # f2 hesapla
+        f2_results = []
+        pct = self.params.get("pct", 20)
+        if ref_masses:
+            for sd in self.all_series:
+                if sd["is_ref"] or not sd["avg"]: continue
+                f2 = calc_f2(ref_masses, sd["avg"]["avg_masses"], co)
+                f2_results.append({"name":sd["name"],"f2":f2})
+        self.ready.emit({
+            "type":"dist","series":series_data,
+            "vis_all":vis_all,"ref_masses":ref_masses,
+            "f2_results":f2_results,"params":self.params
+        })
+
+    def _prepare_scatter(self):
+        """Nokta grafik için değerleri hazırla"""
+        key = self.params.get("key","fpd")
+        series_data = []
+        ref_val = None
+        for sd in self.all_series:
+            if not sd["avg"] or key not in sd["avg"]["params"]: continue
+            val, val_sd = sd["avg"]["params"][key][0], sd["avg"]["params"][key][1]
+            if sd["is_ref"]: ref_val = val
+            series_data.append({
+                "name": sd["name"], "color": sd["color"],
+                "is_ref": sd["is_ref"], "val": val, "val_sd": val_sd
+            })
+        self.ready.emit({
+            "type":"scatter","series":series_data,
+            "ref_val":ref_val,"params":self.params
+        })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # HESAPLAMA THREAD
 # ═══════════════════════════════════════════════════════════════════════════════
 class CalcThread(QThread):
@@ -874,6 +1000,136 @@ class SeriesPanel(QFrame):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# GRAFİK VERİSİ THREAD — Numpy hesaplamalarını arka planda yapar
+# ═══════════════════════════════════════════════════════════════════════════════
+class PlotDataThread(QThread):
+    """Grafik için ağır numpy hesaplamalarını thread'de yapar.
+    Sonuçları sinyal ile gönderir, matplotlib çizimi ana thread'de yapılır."""
+    ready = pyqtSignal(dict)
+    error = pyqtSignal(str)
+
+    def __init__(self, plot_type, all_series, params):
+        super().__init__()
+        self.plot_type = plot_type
+        self.all_series = all_series
+        self.params = params
+
+    def run(self):
+        try:
+            if self.plot_type == "lp":
+                self._prepare_lp()
+            elif self.plot_type == "dist":
+                self._prepare_dist()
+            elif self.plot_type == "scatter":
+                self._prepare_scatter()
+        except Exception:
+            import traceback
+            self.error.emit(traceback.format_exc())
+
+    def _prepare_lp(self):
+        """Log-Probit için regresyon eğrisi noktalarını hesapla"""
+        avg_only = self.params.get("avg_only", True)
+        lo = self.params.get("lo", 15)
+        hi = self.params.get("hi", 85)
+        series_data = []
+        for sd in self.all_series:
+            vr = [r for r in sd["runs"] if "error" not in r]
+            if not vr: continue
+            lw = 2.5 if sd["is_ref"] else 1.5
+            if avg_only:
+                ml = min(len(r["x_reg"]) for r in vr)
+                avg_x = sum(r["x_reg"][:ml] for r in vr) / len(vr)
+                avg_y = sum(r["y_reg"][:ml] for r in vr) / len(vr)
+                ba = sum(r["b"] for r in vr) / len(vr)
+                aa = sum(r["a"] for r in vr) / len(vr)
+                xr = np.linspace(min(avg_x)-0.15, max(avg_x)+0.15, 60)
+                yr = aa + ba * xr
+                mmad_log = None
+                if sd["avg"] and "mmad" in sd["avg"]["params"]:
+                    mv = sd["avg"]["params"]["mmad"][0]
+                    if mv > 0: mmad_log = math.log10(mv)
+                series_data.append({
+                    "name": sd["name"], "color": sd["color"],
+                    "is_ref": sd["is_ref"], "lw": lw,
+                    "pts_x": avg_x.tolist(), "pts_y": avg_y.tolist(),
+                    "line_x": xr.tolist(), "line_y": yr.tolist(),
+                    "mmad_log": mmad_log, "mode": "avg"
+                })
+            else:
+                for run in vr:
+                    xr = np.linspace(min(run["x_reg"])-0.1, max(run["x_reg"])+0.1, 50)
+                    yr = run["a"] + run["b"] * xr
+                    series_data.append({
+                        "name": f"{sd['name']} R{run['run_no']}",
+                        "color": sd["color"], "is_ref": sd["is_ref"], "lw": lw,
+                        "pts_x": run["x_reg"].tolist(), "pts_y": run["y_reg"].tolist(),
+                        "line_x": xr.tolist(), "line_y": yr.tolist(),
+                        "mmad_log": None, "mode": "run"
+                    })
+            # Info etiketi için
+            if sd["avg"] and "slope" in sd["avg"]["params"]:
+                series_data[-1]["slope"] = sd["avg"]["params"]["slope"][0]
+                series_data[-1]["intercept"] = sd["avg"]["params"].get("intercept",(0,))[0]
+                series_data[-1]["mmad_val"] = sd["avg"]["params"].get("mmad",(0,))[0]
+                series_data[-1]["gsd_val"]  = sd["avg"]["params"].get("gsd",(0,))[0]
+                series_data[-1]["r2_val"]   = sd["avg"]["params"].get("r2",(0,))[0]
+        self.ready.emit({"type":"lp","series":series_data,"params":self.params})
+
+    def _prepare_dist(self):
+        """APSD için ortalama ve SD değerlerini hesapla"""
+        flow = self.params["flow"]
+        co = NGI_CUTOFFS[flow]
+        vis_all = ["Throat"] + [s for s in GRAPH_STAGES if co.get(s,999)<900]
+        series_data = []
+        ref_masses = None
+        for sd in self.all_series:
+            if not sd["avg"]: continue
+            ms = [sd["avg"]["avg_masses"].get(s,0) for s in vis_all]
+            vr = [r for r in sd["runs"] if "error" not in r]
+            sds = []
+            for s in vis_all:
+                vals = [r["masses"].get(s,0) for r in vr]
+                sds.append(float(np.std(vals,ddof=1)) if len(vals)>1 else 0.0)
+            series_data.append({
+                "name": sd["name"], "color": sd["color"],
+                "is_ref": sd["is_ref"],
+                "means": ms, "stds": sds
+            })
+            if sd["is_ref"]: ref_masses = sd["avg"]["avg_masses"]
+        # f2 hesapla
+        f2_results = []
+        pct = self.params.get("pct", 20)
+        if ref_masses:
+            for sd in self.all_series:
+                if sd["is_ref"] or not sd["avg"]: continue
+                f2 = calc_f2(ref_masses, sd["avg"]["avg_masses"], co)
+                f2_results.append({"name":sd["name"],"f2":f2})
+        self.ready.emit({
+            "type":"dist","series":series_data,
+            "vis_all":vis_all,"ref_masses":ref_masses,
+            "f2_results":f2_results,"params":self.params
+        })
+
+    def _prepare_scatter(self):
+        """Nokta grafik için değerleri hazırla"""
+        key = self.params.get("key","fpd")
+        series_data = []
+        ref_val = None
+        for sd in self.all_series:
+            if not sd["avg"] or key not in sd["avg"]["params"]: continue
+            val, val_sd = sd["avg"]["params"][key][0], sd["avg"]["params"][key][1]
+            if sd["is_ref"]: ref_val = val
+            series_data.append({
+                "name": sd["name"], "color": sd["color"],
+                "is_ref": sd["is_ref"], "val": val, "val_sd": val_sd
+            })
+        self.ready.emit({
+            "type":"scatter","series":series_data,
+            "ref_val":ref_val,"params":self.params
+        })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # HESAPLAMA THREAD
 # ═══════════════════════════════════════════════════════════════════════════════
 class CalcThread(QThread):
@@ -910,6 +1166,7 @@ class NGIApp(QMainWindow):
         self._sc_ser_checks = {}
         self._sec_series = None
         self._threads = []
+        self._plot_threads = []  # Grafik thread'leri için referans listesi
         self._setup(); self._build_ui()
         self._add_series()
 
@@ -1176,12 +1433,6 @@ class NGIApp(QMainWindow):
         self.btn_csv.clicked.connect(self._load_csv)
         row2.addWidget(self.btn_csv)
         ol.addLayout(row2)
-
-        row3=QHBoxLayout(); row3.setSpacing(5)
-        self.btn_doe=make_btn(self.T["export_doe"],None,"rgba(10,50,80,0.8)")
-        self.btn_doe.clicked.connect(self._export_doe)
-        row3.addWidget(self.btn_doe)
-        ol.addLayout(row3)
         sec_ops["body"].addWidget(ops_w)
         vl.addWidget(sec_ops["outer"])
 
@@ -1483,6 +1734,8 @@ class NGIApp(QMainWindow):
         plot_bg = C["PLOT_BG"]
         for canvas in [self.lp_canvas, self.dist_canvas, self.scatter_canvas]:
             canvas.figure.patch.set_facecolor(plot_bg)
+            for ax in canvas.figure.get_axes():
+                ax.set_facecolor(C["PLOT_BG"])
             canvas.draw()
 
     def _toggle_lang(self):
@@ -1496,7 +1749,6 @@ class NGIApp(QMainWindow):
         self.btn_clr.setText(T["clear"])
         self.btn_pdf.setText(T["export_pdf"])
         self.btn_csv.setText(T["load_csv"])
-        self.btn_doe.setText(T["export_doe"])
         self.btn_add.setText("+ "+T["add_series"])
         self.chk_lp_avg.setText(T["lp_avg_only"])
         self.chk_delivered_tp.setText(T["delivered_tp"])
@@ -1532,7 +1784,9 @@ class NGIApp(QMainWindow):
                 w=lay.itemAt(i).widget()
                 if w: w.setParent(None)
         for canvas in [self.lp_canvas, self.dist_canvas, self.scatter_canvas]:
-            canvas.figure.clear(); canvas.draw()
+            for ax in canvas.figure.get_axes():
+                ax.cla()
+            canvas.draw()
         for i in reversed(range(self.warn_layout.count())):
             w=self.warn_layout.itemAt(i).widget()
             if w: w.setParent(None)
@@ -1585,6 +1839,24 @@ class NGIApp(QMainWindow):
         """Tamamlanan thread'leri listeden temizle"""
         if hasattr(self,'_threads'):
             self._threads=[t for t in self._threads if t.isRunning()]
+        if hasattr(self,'_plot_threads'):
+            self._plot_threads=[t for t in self._plot_threads if t.isRunning()]
+
+    def _on_plot_data_ready(self, data):
+        """PlotDataThread'den gelen veriyi ana thread'de çiz"""
+        ptype = data.get("type")
+        if ptype == "lp":
+            self._plot_lp_draw(data)
+        elif ptype == "dist":
+            self._plot_dist_inner()  # Mevcut çizim metodu
+        elif ptype == "scatter":
+            self._plot_scatter_inner()  # Mevcut çizim metodu
+
+    def _plot_dist_draw_from_data(self, data):
+        self._plot_dist_inner()
+
+    def _plot_scatter_draw_from_data(self, data):
+        self._plot_scatter_inner()
 
     def _on_tab_change(self, idx):
         if not self.all_series: return
@@ -1676,11 +1948,23 @@ class NGIApp(QMainWindow):
         return param
 
     def _plot_scatter(self):
+        """Thread-safe wrapper"""
         if not self.all_series: return
-        plt.close("all")
-        fig=self.scatter_canvas.figure; fig.clear()
+        from PyQt6.QtWidgets import QApplication
+        QApplication.processEvents()
+        self._plot_scatter_inner()
+
+    def _plot_scatter_inner(self):
+        if not self.all_series: return
+        from PyQt6.QtWidgets import QApplication
+        QApplication.processEvents()  # UI donmasını önle
+        fig=self.scatter_canvas.figure
         C=get_theme_colors(); fig.patch.set_facecolor(C["BG"])
-        ax=fig.add_subplot(111); ax.set_facecolor(C["PLOT_BG"])
+        if not fig.get_axes():
+            ax=fig.add_subplot(111)
+        else:
+            ax=fig.get_axes()[0]; ax.cla()
+        ax.set_facecolor(C["PLOT_BG"])
 
         key=self._get_scatter_key()
         lbl=self._get_scatter_label()
@@ -1782,10 +2066,33 @@ class NGIApp(QMainWindow):
         fig.tight_layout(); self.scatter_canvas.draw()
     # ── Log-Probit ────────────────────────────────────────────────────────────
     def _plot_lp(self):
-        plt.close("all")
-        fig=self.lp_canvas.figure; fig.clear()
+        if not self.all_series: return
+        avg_only=self.chk_lp_avg.isChecked() or len(self.all_series)>=4
+        if avg_only and not self.chk_lp_avg.isChecked():
+            self.chk_lp_avg.blockSignals(True); self.chk_lp_avg.setChecked(True)
+            self.chk_lp_avg.blockSignals(False)
+        t = PlotDataThread("lp", self._visible_series(), {
+            "avg_only": avg_only,
+            "flow": int(self.flow_combo.currentText()),
+            "ds": self.T["dec_sep"],
+        })
+        t.ready.connect(self._on_plot_data_ready)
+        t.error.connect(lambda m: print("PlotThread LP err:", m[:200]))
+        t.finished.connect(lambda: self._plot_threads.remove(t) if t in self._plot_threads else None)
+        self._plot_threads.append(t)
+        t.start()
+
+    def _plot_lp_draw(self, data):
+        """Ana thread'de LP grafiğini çiz"""
+        from PyQt6.QtWidgets import QApplication
+        QApplication.processEvents()
+        fig=self.lp_canvas.figure
         C=get_theme_colors(); fig.patch.set_facecolor(C["BG"])
-        ax=fig.add_subplot(111); ax.set_facecolor(C["PLOT_BG"])
+        if not fig.get_axes():
+            ax=fig.add_subplot(111)
+        else:
+            ax=fig.get_axes()[0]; ax.cla()
+        ax.set_facecolor(C["PLOT_BG"])
         flow=int(self.flow_combo.currentText())
         avg_only=self.chk_lp_avg.isChecked() or len(self.all_series)>=4
         if avg_only and not self.chk_lp_avg.isChecked():
@@ -1850,7 +2157,13 @@ class NGIApp(QMainWindow):
 
     # ── APSD Dağılım ──────────────────────────────────────────────────────────
     def _plot_dist(self):
-        plt.close("all")
+        """Thread-safe wrapper: veriyi arka planda hazırlayıp çizer"""
+        if not self.all_series: return
+        from PyQt6.QtWidgets import QApplication
+        QApplication.processEvents()
+        self._plot_dist_inner()
+
+    def _plot_dist_inner(self):
         flow=int(self.flow_combo.currentText())
         co=NGI_CUTOFFS[flow]
         vis_all=["Throat"]+[s for s in GRAPH_STAGES if co.get(s,999)<900]
@@ -1858,9 +2171,15 @@ class NGIApp(QMainWindow):
         lm={"ema":20,"fda":15,"usp":25}
         try: pct=lm.get(self.limit_type) or float(self.e_lim_pct.text())
         except: pct=20
-        fig=self.dist_canvas.figure; fig.clear()
+        from PyQt6.QtWidgets import QApplication
+        QApplication.processEvents()
+        fig=self.dist_canvas.figure
         C=get_theme_colors(); fig.patch.set_facecolor(C["BG"])
-        ax=fig.add_subplot(111); ax.set_facecolor(C["PLOT_BG"])
+        if not fig.get_axes():
+            ax=fig.add_subplot(111)
+        else:
+            ax=fig.get_axes()[0]; ax.cla()
+        ax.set_facecolor(C["PLOT_BG"])
         ref_masses=None; warnings=[]
         for sd in self._visible_series():
             if not sd["avg"]: continue
@@ -2010,7 +2329,6 @@ class NGIApp(QMainWindow):
         flow=int(self.flow_combo.currentText()); co=NGI_CUTOFFS[flow]
         vis_ser=self._visible_series()
         if len(vis_ser)>=2:
-            plt.close("all")
             fig2=Figure(figsize=(9,3.2),facecolor=BG)
             canvas2=FigureCanvas(fig2); canvas2.setMaximumHeight(260)
             ax1=fig2.add_subplot(121); ax2=fig2.add_subplot(122)
@@ -2148,102 +2466,6 @@ class NGIApp(QMainWindow):
         n_r=sum(len(v["runs"]) for v in series_dict.values())
         self._update_series_count()
         self.status_lbl.setText(self.T["csv_loaded"].format(n=n_s,r=n_r))
-
-    # ── DoE Dışa Aktarma ──────────────────────────────────────────────────────
-    def _export_doe(self):
-        import json, subprocess
-        if not self.all_series:
-            QMessageBox.warning(self, "DoE", self.T.get("doe_no_data","Önce hesaplama yapın.")); return
-        flow, lo, hi = self._get_flow_lo_hi()
-        default_name = f"doe_data_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.json"
-        path, _ = QFileDialog.getSaveFileName(
-            self, "DoE Verisini Kaydet", default_name, "JSON (*.json)")
-        if not path: return
-        export = {
-            "export_info": {
-                "source": "NGI-CITDAS",
-                "version": "v6",
-                "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "product": self.e_product.text(),
-                "batch": self.e_batch.text(),
-                "operator": self.e_operator.text(),
-                "flow_rate": flow,
-                "valid_range": [lo, hi]
-            },
-            "series": []
-        }
-        for sd in self.all_series:
-            runs_out = []
-            for r in sd["runs"]:
-                if "error" in r:
-                    runs_out.append({"error": r["error"]}); continue
-                runs_out.append({
-                    "mmad":        round(r.get("mmad", 0), 4),
-                    "gsd":         round(r.get("gsd", 0), 4),
-                    "fpd_5um":     round(r.get("fpd", 0), 4),
-                    "fpf_5um":     round(r.get("fpf", 0), 4),
-                    "fpd_3um":     round(r.get("fpd3", 0), 4),
-                    "fpf_3um":     round(r.get("fpf3", 0), 4),
-                    "fpd_15um":    round(r.get("fpd15", 0), 4),
-                    "fpf_15um":    round(r.get("fpf15", 0), 4),
-                    "metered":     round(r.get("metered", 0), 4),
-                    "delivered":   round(r.get("delivered", 0), 4),
-                    "slope":       round(r.get("slope", 0), 4),
-                    "intercept":   round(r.get("intercept", 0), 4),
-                    "r2":          round(r.get("r2", 0), 4),
-                    "stage_deposits": {
-                        s: round(r.get("masses", {}).get(s, 0), 4)
-                        for s in ALL_KEYS
-                    }
-                })
-            avg_out = {}
-            if sd.get("avg"):
-                for p, (m, s, rsd) in sd["avg"]["params"].items():
-                    avg_out[p] = {"mean": round(m,4), "sd": round(s,4), "rsd": round(rsd,2)}
-            export["series"].append({
-                "series_id":         sd["name"],
-                "is_reference":      sd.get("is_ref", False),
-                "color":             sd.get("color", "#2E75B6"),
-                "n_valid_runs":      sd["avg"]["n_valid"] if sd.get("avg") else 0,
-                "runs":              runs_out,
-                "mean":              avg_out,
-                "avg_stage_deposits": {
-                    s: round(sd["avg"]["avg_masses"].get(s, 0), 4)
-                    for s in ALL_KEYS
-                } if sd.get("avg") else {}
-            })
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(export, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            QMessageBox.critical(self, "DoE Hatası", str(e)); return
-        success_msg = self.T.get("doe_success", "DoE verisi kaydedildi:").replace("{path}", path)
-        ask_msg = self.T.get("doe_open_ask", "DoE Analyzer’ı şimdi açmak ister misiniz?")
-        reply = QMessageBox.question(
-            self, "DoE Export",
-            success_msg + "\n\n" + ask_msg,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            doe_exe = os.path.join(os.path.dirname(path), "NGI_DoE_Analyzer.exe")
-            if not os.path.exists(doe_exe):
-                doe_exe = os.path.join(
-                    os.path.dirname(os.path.abspath(
-                        sys.executable if getattr(sys,"frozen",False) else __file__)),
-                    "NGI_DoE_Analyzer.exe")
-            if os.path.exists(doe_exe):
-                import platform
-                if platform.system() == "Windows":
-                    subprocess.Popen(
-                        [doe_exe, path],
-                        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-                    )
-                else:
-                    subprocess.Popen([doe_exe, path])
-            else:
-                QMessageBox.information(self, "DoE",
-                    "NGI_DoE_Analyzer.exe bulunamadi.\n"
-                    "Dosyayi manuel olarak acip JSON'u import edin:\n" + path)
 
     # ── PDF Rapor ─────────────────────────────────────────────────────────────
     def _export_pdf(self):
